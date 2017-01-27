@@ -1,7 +1,7 @@
 package astraea.demo
 
 import geotrellis.proj4.LatLng
-import geotrellis.raster.{ByteConstantTile, IntConstantTile, MultibandTile}
+import geotrellis.raster.{ByteArrayTile, ByteConstantTile, IntConstantTile, MultibandTile}
 import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.spark.io.avro.AvroRecordCodec
 import geotrellis.spark.io.avro.codecs.Implicits._
@@ -24,10 +24,12 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     val tpe = TemporalProjectedExtent(Extent(0.0, 0.0, 8.0, 10.0), LatLng, ZonedDateTime.now())
 
+    val (t1, t2, t3) = (ByteConstantTile(1, 10, 10), ByteConstantTile(2, 10, 10), ByteConstantTile(3, 10, 10))
+
     val tile = MultibandTile(
-      ByteConstantTile(1, 10, 10),
-      ByteConstantTile(2, 10, 10),
-      ByteConstantTile(3, 10, 10)
+      ByteArrayTile(t1.toBytes(), 10, 10),
+      ByteArrayTile(t2.toBytes(), 10, 10),
+      ByteArrayTile(t3.toBytes(), 10, 10)
     )
 
     val target = (tpe, tile)
