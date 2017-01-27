@@ -6,4 +6,4 @@ To run:
 
     sbt run
     
-(Main class is `astraea.demo.HijackAvro`)    
+(Main class is `astraea.demo.DatabricksAvro`)    

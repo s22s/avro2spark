@@ -10,8 +10,10 @@ import com.databricks.spark.avro.SchemaConverters
 import java.time.ZonedDateTime
 
 import com.databricks.spark.avro.hack.SchemaConvertersBackdoor
+import geotrellis.spark.io.kryo.KryoRegistrator
 import org.apache.avro.generic.GenericRecord
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.catalyst.expressions.GenericRow
 import org.apache.spark.sql.types.StructType
@@ -33,8 +35,7 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
     )
 
     val target = (tpe, tile)
-
-    val codec: AvroRecordCodec[(TemporalProjectedExtent, MultibandTile)] = codecOf(target)
+    val codec = codecOf(target)
 
     println(s"codec.schema.toString(true): ${codec.schema.toString(true)}")
 
@@ -42,12 +43,10 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     val sqlType = SchemaConverters.toSqlType(codec.schema)
 
-    println(s"sqlType: $sqlType")
-    println(s"sqlType.dataType.prettyJson: ${sqlType.dataType.prettyJson}")
-
-
     def makeRowEncoder[T](codec: AvroRecordCodec[T]) = {
       val sqlType = SchemaConverters.toSqlType(codec.schema)
+      println(s"sqlType.dataType.prettyJson: ${sqlType.dataType.prettyJson}")
+
       val structType = sqlType.dataType match {
         case st: StructType ⇒ st
         case _ ⇒ throw new IllegalArgumentException(s"${sqlType.dataType} not a struct")
@@ -57,35 +56,38 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
       val structTranslator = SchemaConvertersBackdoor.createConverterToSQL(codec.schema, structType)
 
-      val cast = (a: AnyRef) ⇒ a.asInstanceOf[GenericRow]
+      val cast = (a: AnyRef) ⇒ a.asInstanceOf[Row]
 
-      val rowEncoder = RowEncoder(structType)
-
-      avroEncoder andThen structTranslator andThen cast andThen rowEncoder.toRow
+      avroEncoder andThen structTranslator andThen cast
     }
 
     val encoder = makeRowEncoder(codec)
 
-    val at = encoder(target)
-    println("at: " + at)
+    val spark = SparkSession.builder()
+      .master("local[2]")
+      .appName("avro2spark")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrator", classOf[KryoRegistrator].getName)
+      .getOrCreate()
+
+    import spark.implicits._
+
+    @transient
+    val sc = spark.sparkContext
+
+    val gtrdd = sc.makeRDD(Seq(target))
+
+    val trans: RDD[Row] = gtrdd.map { p ⇒
+      val encoder = makeRowEncoder(codec)
+      encoder(p)
+    }
 
 
 
-//    val spark = SparkSession.builder()
-//      .master("local[2]")
-//      .appName("AvroReadBenchmark")
-//      .getOrCreate()
-//
-//    import spark.implicits._
-//
-//    val sc = spark.sparkContext
-//
-//    val gtrdd = sc.makeRDD(Seq(target))
-//
-//    val gtds = gtrdd.map(encoder).toDF
-//
-//    gtds.show()
-//
-//    spark.stop()
+    val gtdf = spark.createDataFrame(trans , sqlType.dataType.asInstanceOf[StructType])
+
+    gtdf.show(false)
+
+    spark.stop()
   }
 }
