@@ -11,17 +11,17 @@ import geotrellis.spark.io.avro.AvroRecordCodec
 import geotrellis.vector.Extent
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, CodegenFallback, ExprCode}
-import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericRow, LeafExpression, Literal, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
+import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
+import org.apache.spark.sql.catalyst.expressions.{BoundReference, GenericInternalRow, GenericRow, Literal, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.types._
 
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
 
 object DatabricksAvro extends TemporalProjectedExtentCodec {
-  case class EncodeUsingAvro[T: ClassTag](child: BoundReference, schema: StructType, codec: AvroRecordCodec[T]) extends UnaryExpression with NonSQLExpression with CodegenFallback {
-    override def dataType: DataType = schema
+  case class EncodeUsingAvro[T: ClassTag](child: BoundReference, sparkSchema: StructType, codec: AvroRecordCodec[T]) extends UnaryExpression with NonSQLExpression with CodegenFallback {
+    override def dataType: DataType = sparkSchema
 
     override def nullable: Boolean = false
 
@@ -31,17 +31,25 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
       }
       else {
         val obj = input.get(child.ordinal, null).asInstanceOf[T]
-        val encoded = codec.encode(obj)
-        val converter = SchemaConvertersBackdoor.createConverterToSQL(codec.schema, schema)
-        InternalRow.fromSeq(converter(encoded).asInstanceOf[GenericRow].toSeq)
+        val avroEncoded = codec.encode(obj)
+        val converter = SchemaConvertersBackdoor.createConverterToSQL(codec.schema, sparkSchema)
+        val genericRow = converter(avroEncoded).asInstanceOf[GenericRow]
+        val sqlRowlEncoder = RowEncoder(sparkSchema)
+
+        // XXX Data corruption happening here in writing to `UnsafeRow`.
+        sqlRowlEncoder.toRow(genericRow)
       }
     }
   }
 
-  private def codecOf[T: AvroRecordCodec](t: T) = implicitly[AvroRecordCodec[T]]
-
-
   object AvroDerivedEncoder {
+    /** Hack to get spark to create an `ObjectType` for us. */
+    def sparkDataType[T: ClassTag]: DataType = {
+      import org.apache.spark.sql.catalyst.dsl.expressions._
+      val clsTag = implicitly[ClassTag[T]]
+      DslSymbol(Symbol(clsTag.toString())).obj(clsTag.runtimeClass).dataType
+    }
+
     def apply[T: AvroRecordCodec: ClassTag: TypeTag]: Encoder[T] = {
 
       val codec = implicitly[AvroRecordCodec[T]]
@@ -53,20 +61,18 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
         }
       }
 
-      sparkSchema.printTreeString()
 
-      // Assuming "flat" means all columns are primitive types.
-      val flat = !sparkSchema.fields.exists(_.dataType.isInstanceOf[StructType])
-      val clsTag = implicitly[ClassTag[T]]
-      val serializer: Seq[Expression] = {
-        val br = BoundReference(0, sparkSchema, false)
-        // need to figure out how to use the codec.encode method via expression
-
-        Seq(EncodeUsingAvro(br, sparkSchema, codec))
-
-      }
-      val deserializer: Expression =  Literal("dummy")
-      ExpressionEncoder[T](sparkSchema, flat, serializer, deserializer, clsTag)
+      ExpressionEncoder[T](
+        schema = sparkSchema,
+        // Assuming "flat" means all columns are primitive types. Not really sure.
+        flat = !sparkSchema.fields.exists(_.dataType.isInstanceOf[StructType]),
+        serializer = {
+          //val sourceDataType: DataType = NullType // Want `ObjectType`, but it's private
+          val br = BoundReference(0, sparkDataType[T], false)
+          Seq(EncodeUsingAvro(br, sparkSchema, codec))
+        },
+        deserializer = Literal(null),
+        clsTag = implicitly[ClassTag[T]])
     }
   }
 
@@ -87,34 +93,6 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     val target = testData
 
-//    val codec = codecOf(target)
-//
-//    //println(s"codec.schema.toString(true): ${codec.schema.toString(true)}")
-//
-//    //println("*" * 50)
-//
-//    val sqlType = SchemaConverters.toSqlType(codec.schema)
-//
-//    def makeRowEncoder[T](codec: AvroRecordCodec[T]) = {
-//      val sqlType = SchemaConverters.toSqlType(codec.schema)
-//      //println(s"sqlType.dataType.prettyJson: ${sqlType.dataType.prettyJson}")
-//
-//      val structType = sqlType.dataType match {
-//        case st: StructType ⇒ st
-//        case _ ⇒ throw new IllegalArgumentException(s"${sqlType.dataType} not a struct")
-//      }
-//
-//      val avroEncoder: (T) ⇒ GenericRecord = codec.encode
-//
-//      val structTranslator = SchemaConvertersBackdoor.createConverterToSQL(codec.schema, structType)
-//
-//      val cast = (a: AnyRef) ⇒ a.asInstanceOf[Row]
-//
-//      avroEncoder andThen structTranslator andThen cast
-//    }
-//
-//    // val encoder = makeRowEncoder(codec)
-
     val spark = SparkSession.builder()
       .master("local[1]")
       .appName("avro2spark")
@@ -134,6 +112,9 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
     val gtdf = gtrdd.map(_._1).toDS
 
     gtdf.printSchema()
+
+    import org.apache.spark.sql.execution.debug._
+
     gtdf.show(false)
 
 //    val trans: RDD[Row] = gtrdd.map { p ⇒
@@ -158,7 +139,4 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     spark.stop()
   }
-
-
-
 }
