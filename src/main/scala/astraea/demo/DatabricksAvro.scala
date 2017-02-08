@@ -53,10 +53,10 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     val gtrdd = sc.makeRDD(Seq(target))
 
-    //implicit val tpeEncoder = AvroDerivedEncoder[TemporalProjectedExtent]
+    implicit val tpeEncoder = AvroDerivedSparkEncoder[TemporalProjectedExtent]
     implicit val extentEncoder = AvroDerivedSparkEncoder[Extent]
 
-    val gtdf = gtrdd.map(_._1.extent).toDS
+    val gtdf = gtrdd.map(_._1).toDS
 
     gtdf.printSchema()
 

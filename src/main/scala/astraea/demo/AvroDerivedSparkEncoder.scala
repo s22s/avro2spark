@@ -36,7 +36,7 @@ object AvroDerivedSparkEncoder {
       schema = sparkSchema,
       // Now wondering if `flat` might mean that a single column is expanded into multiple ones?
       // ~~Assuming "flat" means all columns are primitive types. Not really sure.~~
-      flat = false, //!sparkSchema.fields.exists(_.dataType.isInstanceOf[StructType]),
+      flat = sparkSchema.fields.length == 1 && !sparkSchema.fields.exists(_.dataType.isInstanceOf[StructType]),
       serializer = {
         val br = BoundReference(0, sparkDataType[T], false)
         sparkSchema.fields.map(f ⇒ EncodeUsingAvro(br, f, codec))
