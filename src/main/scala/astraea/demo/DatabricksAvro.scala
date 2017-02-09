@@ -8,6 +8,7 @@ import geotrellis.raster.{ByteArrayTile, MultibandTile}
 import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.vector.Extent
 import org.apache.spark.sql._
+import org.apache.spark.sql.functions._
 
 object DatabricksAvro extends TemporalProjectedExtentCodec {
 
@@ -40,16 +41,27 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
     @transient
     val sc = spark.sparkContext
 
+
+    implicit val tpeEncoder = AvroDerivedSparkEncoder[TemporalProjectedExtent]
+    implicit val mbtEncoder = AvroDerivedSparkEncoder[MultibandTile]
+    implicit val kvEncoder = AvroDerivedSparkEncoder[(TemporalProjectedExtent, MultibandTile)]//Encoders.tuple(tpeEncoder, mbtEncoder)
+
     val gtrdd = sc.makeRDD(Seq.fill(3)(testData))
 
-    implicit val kvEncoder = AvroDerivedSparkEncoder[(TemporalProjectedExtent, MultibandTile)]
-    implicit val tpeEncoder = AvroDerivedSparkEncoder[TemporalProjectedExtent]
+    val dataFrames = Seq(
+      gtrdd.toDS,
+      gtrdd.map(_._1).toDS,
+      gtrdd.map(_._2).toDS,
+      gtrdd.map(_._2).toDS.select(explode('bands))
+    )
 
-    val gtdf = gtrdd.toDS
-
-    gtdf.printSchema()
-
-    gtdf.show(false)
+    dataFrames.foreach { df ⇒
+      println("~" * 60)
+      df.describe()
+      df.explain()
+      df.show(false)
+      df.toJSON.show(false)
+    }
 
 
 //    val tsum = udf((row: Array[Byte]) ⇒ row.sum)
