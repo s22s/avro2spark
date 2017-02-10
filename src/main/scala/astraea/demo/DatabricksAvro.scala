@@ -8,11 +8,14 @@ import geotrellis.raster.{ByteArrayTile, MultibandTile}
 import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.vector.Extent
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.functions._
+
+import scala.beans.BeanProperty
 
 object DatabricksAvro extends TemporalProjectedExtentCodec {
 
-  val counter = new AtomicInteger(0)
+  private val counter = new AtomicInteger(0)
 
   def testData: (TemporalProjectedExtent, MultibandTile) = {
 
@@ -29,6 +32,7 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
      (tpe, tile)
   }
 
+
   def main(args: Array[String]): Unit = {
 
     val spark = SparkSession.builder()
@@ -40,6 +44,7 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     @transient
     val sc = spark.sparkContext
+
 
 
     implicit val tpeEncoder = AvroDerivedSparkEncoder[TemporalProjectedExtent]
@@ -58,25 +63,44 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
     dataFrames.foreach { df ⇒
       println("~" * 60)
       df.describe()
-      df.explain()
+      df.explain(true)
       df.show(false)
       df.toJSON.show(false)
     }
 
-
-//    val tsum = udf((row: Array[Byte]) ⇒ row.sum)
-//    //val tilef = udf((t: ArrayMultibandTile) ⇒ t)
-//
-//    val sel = gtdf.select(explode($"_2.bands.member0.cells").as("cells")).select(tsum($"cells"))
-//      //.select(coalesce($"member3", $"member1", $"member0"))
-//    sel.printSchema()
-//    sel.show(false)
-
-
-//    val del = gtdf.select(tilef($"_2"))
-//    del.printSchema()
-//    del.show(false)
-
     spark.stop()
+  }
+
+
+
+  case class Foo(stuff: Seq[Int], name: String, other: Double)
+
+  class Foo2(
+    @BeanProperty var stuff: java.util.List[java.lang.Integer],
+    @BeanProperty var name: String,
+    @BeanProperty var other: Double
+  )
+
+  def pokeEncoders(): Unit = {
+
+    println("#" * 60)
+
+    val enc = Encoders.product[Foo].asInstanceOf[ExpressionEncoder[Foo]]
+    enc.serializer.foreach(e ⇒ println(e.treeString(true)))
+    println(enc.deserializer.treeString(true))
+
+    println("#" * 60)
+    val enc2 = Encoders.bean[Foo2](classOf[Foo2]).asInstanceOf[ExpressionEncoder[Foo2]]
+    enc2.serializer.foreach(e ⇒ println(e.treeString(true)))
+    println(enc2.deserializer.treeString(true))
+
+    println("#" * 60)
+
+    val enc3 = ExpressionEncoder[(Int, String)]
+    enc3.serializer.foreach(e ⇒ println(e.treeString(true)))
+    println(enc3.deserializer.treeString(true))
+
+    println("#" * 60)
+
   }
 }

@@ -6,10 +6,11 @@ import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.generic.GenericRecord
 import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.ScalaReflection
-import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
+import org.apache.spark.sql.catalyst.analysis.{TypeCheckResult, UnresolvedAlias}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.expressions.{BoundReference, CreateNamedStruct, Expression, GenericRow, Literal, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.objects.{CreateExternalRow, GetExternalRowField, MapObjects}
+import org.apache.spark.sql.catalyst.expressions.{Alias, AttributeReference, BoundReference, CreateNamedStruct, Expression, GenericRow, Literal, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.catalyst.util.GenericArrayData
 import org.apache.spark.sql.types._
 
@@ -37,6 +38,7 @@ object AvroDerivedSparkEncoder {
     val inputObject = BoundReference(0, dataTypeFor[T], nullable = false)
 
     val serializer = serializerFor[T](inputObject, schema)
+    println(serializer.treeString(true))
 
     val deserializer = deserializerFor[T]
 
@@ -63,6 +65,7 @@ object AvroDerivedSparkEncoder {
     override protected def nullSafeEval(input: Any): GenericRecord = {
       val obj = input.asInstanceOf[T]
       val codec = implicitly[AvroRecordCodec[T]]
+      println(">>>>>>> Encoding: " + obj)
       codec.encode(obj)
     }
 
@@ -168,11 +171,11 @@ object AvroDerivedSparkEncoder {
   }
 
   def serializerFor[T : AvroRecordCodec](inputObject: Expression, schema: StructType): CreateNamedStruct = {
-    val asAvro = EncodeToAvro(inputObject)
+    val asAvro = Alias(EncodeToAvro(inputObject), "foobar")()
 
-    val nameExpressionPairs = schema.fields.flatMap(f ⇒
-      Literal(f.name) :: ExtractFromAvro(asAvro, f) :: Nil
-    )
+    val nameExpressionPairs = schema.fields.zipWithIndex.flatMap { case (field, index) ⇒
+      Literal(field.name) :: ExtractFromAvro(asAvro.toAttribute, field) :: Nil
+    }
     CreateNamedStruct(nameExpressionPairs)
   }
 
