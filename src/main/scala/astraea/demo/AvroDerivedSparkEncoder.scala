@@ -1,17 +1,19 @@
 package astraea.demo
 
+import java.nio.ByteBuffer
+
 import com.databricks.spark.avro.SchemaConverters
-import com.databricks.spark.avro.hack.SchemaConvertersBackdoor
 import geotrellis.spark.io.avro.AvroRecordCodec
+import org.apache.avro.generic.GenericData.Fixed
 import org.apache.avro.generic.GenericRecord
 import org.apache.spark.sql.Encoder
-import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.expressions.{BoundReference, CreateNamedStruct, Expression, GenericRow, Literal, NonSQLExpression, UnaryExpression}
-import org.apache.spark.sql.catalyst.util.GenericArrayData
+import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, Literal, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.catalyst.{InternalRow, ScalaReflection}
 import org.apache.spark.sql.types._
 
+import scala.collection.JavaConversions._
 import scala.collection.JavaConverters.iterableAsScalaIterableConverter
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
@@ -37,7 +39,6 @@ object AvroDerivedSparkEncoder {
     val inputObject = BoundReference(0, dataTypeFor[T], nullable = false)
 
     val serializer = serializerFor[T](inputObject, schema)
-    //println(serializer.treeString(true))
 
     val deserializer = deserializerFor[T]
 
@@ -59,7 +60,7 @@ object AvroDerivedSparkEncoder {
   case class EncodeToAvro[T: AvroRecordCodec](child: Expression)
     extends UnaryExpression with NonSQLExpression with CodegenFallback {
 
-    override def dataType: DataType = EncodeToAvro.genericRecordType
+    override def dataType: DataType = dataTypeFor[GenericRecord]
 
     override def nullable: Boolean = false
 
@@ -67,14 +68,13 @@ object AvroDerivedSparkEncoder {
       val obj = input.asInstanceOf[T]
       val codec = implicitly[AvroRecordCodec[T]]
       //println(">>>>>>> Encoding: " + obj)
-      codec.encode(obj)
+      val result = codec.encode(obj)
+      // XXX: The problem here is that if a union type is involved, the intermediate
+      // array representation is removed in the value but not in the spark schema.
+      result
     }
 
     override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
-  }
-
-  object EncodeToAvro {
-    val genericRecordType = dataTypeFor[GenericRecord]
   }
 
   case class AvroToSpark(child: Expression, sparkSchema: StructType)
@@ -82,121 +82,48 @@ object AvroDerivedSparkEncoder {
 
     override def dataType: DataType = sparkSchema
 
-    def convertRow(genericRecord: GenericRecord, rowSchema: StructType): InternalRow = {
-
-      def convertField(fieldValue: Any, sparkType: DataType): Any = {
-
-        sparkType match {
-          case nestedSchema: StructType ⇒
-            val nestedRecord = fieldValue.asInstanceOf[GenericRecord]
-            val converter = SchemaConvertersBackdoor.createConverterToSQL(nestedRecord.getSchema, nestedSchema)
-            val genericRow = converter(nestedRecord).asInstanceOf[GenericRow]
-            val sqlRowlEncoder = RowEncoder(nestedSchema)
-            sqlRowlEncoder.toRow(genericRow)
-          case arraySchema: ArrayType ⇒
-            val nestedRecord = fieldValue.asInstanceOf[java.util.AbstractCollection[AnyRef]]
-            val avroRecord = fieldValue.asInstanceOf[GenericRecord]
-
-            // Get the schema of the element type
-
-            val elementSchema = avroRecord.getSchema.getField("foobar").schema().getElementType
-
-            val converter = SchemaConvertersBackdoor.createConverterToSQL(elementSchema, arraySchema.elementType)
-
-            val caster = (a: AnyRef) ⇒ a.asInstanceOf[GenericRow]
-
-            val transform = arraySchema.elementType match {
-              case st: StructType ⇒
-                converter andThen caster andThen RowEncoder(st).toRow
-              case _ ⇒ converter
-            }
-
-            val result = nestedRecord.asScala.map(transform)
-
-            new GenericArrayData(result)
-          case _ ⇒
-            //val converter = SchemaConvertersBackdoor.createConverterToSQL(avroRecord.getSchema, sparkSchema.dataType)
-            //val result = converter(fieldValue)
-            //println(fieldValue + " -> " + result)
-            //result
-            println(s"skipping ${fieldValue} of type ${sparkType}")
-            fieldValue
-        }
-      }
-
-      convertField(genericRecord, rowSchema).asInstanceOf[InternalRow]
-
-      //InternalRow(sparkSchema.fields.map { f ⇒
-//        convertField(genericRow.getAs[Any](f.name), f.dataType)
-//      })
+    private def convertAny(data: Any, fieldType: DataType): Any = (data, fieldType) match {
+      case (av, _: NumericType) ⇒ av
+      case (sv, _: StringType) ⇒ sv
+      case (bv, _: BooleanType) ⇒ bv
+      case (rv: GenericRecord, st: StructType) ⇒ convertRecord(rv, st)
+      case (av: ByteBuffer, at: ArrayType) ⇒ av.array()
+      case (av: java.lang.Iterable[_], at: ArrayType) ⇒
+        av.asScala.map(e ⇒ convertAny(e, at.elementType))
+      case (bv: Fixed, bt: BinaryType) ⇒
+        // Notes in spark-avro indicate that the buffer behind Fixed is shared and needs to be cloned.
+        bv.bytes().clone()
+      case (bv: ByteBuffer, bt: BinaryType) ⇒ bv.array()
+      case (v, t) ⇒
+        throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
     }
 
-    override protected def nullSafeEval(input: Any): Any = {
-      val avroRecord = input.asInstanceOf[GenericRecord]
+    private val fieldConverter = (convertAny _).tupled
 
-//      val converter = SchemaConvertersBackdoor.createConverterToSQL(avroRecord.getSchema, sparkSchema)
-//      val genericRow = converter(avroRecord).asInstanceOf[GenericRow]
-      convertRow(avroRecord, sparkSchema)
+    private def convertRecord(gr: GenericRecord, sparkSchema: StructType): InternalRow = {
+      val fieldDataWithType = gr.getSchema.getFields
+        .map { field ⇒
+
+          println(field.name + " is " + field.schema())
+
+          val spark = sparkSchema(field.name())
+          println("nullable: " + spark.nullable)
+          val fieldValue = gr.get(field.name())
+          (fieldValue, spark.dataType)
+        }
+      new GenericInternalRow(fieldDataWithType.map(fieldConverter).toArray)
+    }
+
+    override protected def nullSafeEval(input: Any): InternalRow = {
+      val avroRecord = input.asInstanceOf[GenericRecord]
+      // We can't rely on the already computed Spark schema (as declared by DataType)
+      // because UNION types result in a change in structure
+      val sqlType = SchemaConverters.toSqlType(avroRecord.getSchema)
+
+
+      convertRecord(avroRecord, sqlType.dataType.asInstanceOf[StructType])
     }
   }
-
-//  /** Expression for pulling a specific field out of */
-//  case class ExtractFromAvro(child: Expression, sparkSchema: StructField)
-//    extends UnaryExpression with NonSQLExpression with CodegenFallback {
-//
-//    override def checkInputDataTypes(): TypeCheckResult = {
-//      child.dataType match {
-//        //case e if e == EncodeToAvro.genericRecordType ⇒ TypeCheckResult.TypeCheckSuccess
-//        case e if e == BinaryType ⇒ TypeCheckResult.TypeCheckSuccess
-//        case _ ⇒ TypeCheckResult.TypeCheckFailure("Bad datatype: " + child.dataType)
-//      }
-//    }
-//
-//    override protected def nullSafeEval(input: Any): Any = {
-//      val avroRecord = input.asInstanceOf[GenericRecord]
-//
-//      val fieldValue = avroRecord.get(sparkSchema.name)
-//
-//      dataType match {
-//        case nestedSchema: StructType ⇒
-//          val nestedRecord = fieldValue.asInstanceOf[GenericRecord]
-//          val converter = SchemaConvertersBackdoor.createConverterToSQL(nestedRecord.getSchema, nestedSchema)
-//          val genericRow = converter(nestedRecord).asInstanceOf[GenericRow]
-//          val sqlRowlEncoder = RowEncoder(nestedSchema)
-//          sqlRowlEncoder.toRow(genericRow)
-//        case arraySchema: ArrayType ⇒
-//          val nestedRecord = fieldValue.asInstanceOf[java.util.AbstractCollection[AnyRef]]
-//
-//          val elementSchema = avroRecord.getSchema.getField(sparkSchema.name).schema().getElementType
-//
-//          val converter = SchemaConvertersBackdoor.createConverterToSQL(elementSchema, arraySchema.elementType)
-//
-//          val caster = (a: AnyRef) ⇒ a.asInstanceOf[GenericRow]
-//
-//          val transform = arraySchema.elementType match {
-//            case st: StructType ⇒
-//              converter andThen caster andThen RowEncoder(st).toRow
-//            case _ ⇒ converter
-//          }
-//
-//          val result = nestedRecord.asScala.map(transform)
-//
-//          new GenericArrayData(result)
-//        case _ ⇒
-//          //val converter = SchemaConvertersBackdoor.createConverterToSQL(avroRecord.getSchema, sparkSchema.dataType)
-//          //val result = converter(fieldValue)
-//          //println(fieldValue + " -> " + result)
-//          //result
-//          fieldValue
-//      }
-//    }
-//
-//    override def dataType: DataType = sparkSchema.dataType
-//
-//    override def nullable: Boolean = false
-//
-//  }
-
 
   private def classTagFor[T: TypeTag] = {
     val mirror = typeTag[T].mirror
@@ -204,14 +131,6 @@ object AvroDerivedSparkEncoder {
     val cls = mirror.runtimeClass(tpe)
     ClassTag[T](cls)
   }
-
-
-  /** Hack to get spark to create an `ObjectType` for us. */
-//  private def sparkDataType[T: ClassTag]: DataType = {
-//    import org.apache.spark.sql.catalyst.dsl.expressions._
-//    val clsTag = implicitly[ClassTag[T]]
-//    DslSymbol(Symbol(clsTag.toString())).obj(clsTag.runtimeClass).dataType
-//  }
 
   /**
    * Returns the Spark SQL DataType for a given scala type.  Where this is not an exact mapping
@@ -234,12 +153,13 @@ object AvroDerivedSparkEncoder {
     }
   }
 
-  def fieldNameFor[T: TypeTag]: String = classTagFor[T].runtimeClass.getName
+  def fieldNameFor[T: TypeTag]: String = classTagFor[T].runtimeClass.getSimpleName
 
-  def serializerFor[T: AvroRecordCodec: TypeTag](inputObject: Expression, schema: StructType): Expression = {
+  def serializerFor[T: AvroRecordCodec: TypeTag](
+    inputObject: Expression, schema: StructType): Expression = {
     val asAvro = EncodeToAvro(inputObject)
     val asSpark = AvroToSpark(asAvro, schema)
-    CreateNamedStruct(Literal(fieldNameFor[T]) :: asSpark :: Nil)
+    asSpark
   }
 
   // TODO: This definitely needs to be defined properly for encoder chaining to work (e.g. tuples or products)

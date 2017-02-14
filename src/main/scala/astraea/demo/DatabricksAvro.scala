@@ -56,8 +56,8 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
     val dataFrames = Seq(
       gtrdd.toDS,
       gtrdd.map(_._1).toDS,
-      gtrdd.map(_._2).toDS,
-      gtrdd.map(_._2).toDS.select(explode('bands))
+      gtrdd.map(_._2).toDS
+      //gtrdd.map(_._2).toDS.select(explode('bands))
     )
 
     dataFrames.foreach { df ⇒
