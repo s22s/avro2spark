@@ -20,3 +20,4 @@ project/plugins/project/
 *.hdf5
 spark/src/test/jupyter/.ipynb_checkpoints
 .ipynb_checkpoints
+metastore_db

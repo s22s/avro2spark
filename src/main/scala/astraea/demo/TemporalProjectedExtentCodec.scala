@@ -3,9 +3,7 @@ package astraea.demo
 import geotrellis.proj4.CRS
 import geotrellis.spark._
 import geotrellis.spark.io.avro._
-import geotrellis.spark.io.avro.codecs._
 import geotrellis.spark.io.avro.codecs.Implicits._
-import geotrellis.vector._
 
 import org.apache.avro._
 import org.apache.avro.generic._
