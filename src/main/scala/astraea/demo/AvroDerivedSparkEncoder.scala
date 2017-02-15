@@ -4,8 +4,9 @@ import java.nio.ByteBuffer
 
 import com.databricks.spark.avro.SchemaConverters
 import geotrellis.spark.io.avro.AvroRecordCodec
+import org.apache.avro.Schema.Type
 import org.apache.avro.generic.GenericData.Fixed
-import org.apache.avro.generic.GenericRecord
+import org.apache.avro.generic.{GenericData, GenericRecord}
 import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
@@ -17,6 +18,7 @@ import scala.collection.JavaConversions._
 import scala.collection.JavaConverters.iterableAsScalaIterableConverter
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
+import scala.util.Try
 
 /**
  * Spark SQL [[Encoder]] derived from an existing GeoTrellis [[AvroRecordCodec]].
@@ -64,14 +66,19 @@ object AvroDerivedSparkEncoder {
 
     override def nullable: Boolean = false
 
-    override protected def nullSafeEval(input: Any): GenericRecord = {
+    override protected def nullSafeEval(input: Any): Any = {
       val obj = input.asInstanceOf[T]
       val codec = implicitly[AvroRecordCodec[T]]
-      //println(">>>>>>> Encoding: " + obj)
       val result = codec.encode(obj)
       // XXX: The problem here is that if a union type is involved, the intermediate
       // array representation is removed in the value but not in the spark schema.
-      result
+      //result.getSchema.addProp("rootSchema", avroRootSchema)
+      val avroSchema = codec.schema
+      if(avroSchema.getType == Type.UNION) {
+        //val index = GenericData.get().resolveUnion(avroSchema, input)
+        result
+      }
+      else result
     }
 
     override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
@@ -100,28 +107,33 @@ object AvroDerivedSparkEncoder {
 
     private val fieldConverter = (convertAny _).tupled
 
-    private def convertRecord(gr: GenericRecord, sparkSchema: StructType): InternalRow = {
-      val fieldDataWithType = gr.getSchema.getFields
-        .map { field ⇒
-
-          println(field.name + " is " + field.schema())
-
-          val spark = sparkSchema(field.name())
-          println("nullable: " + spark.nullable)
-          val fieldValue = gr.get(field.name())
-          (fieldValue, spark.dataType)
-        }
-      new GenericInternalRow(fieldDataWithType.map(fieldConverter).toArray)
+    /** Using convention used in spark-avro, guess at whether or not we're dealing with a union type. */
+    private def isUnion(sparkSchema: StructType) = {
+      val names = sparkSchema.fieldNames
+      names.length > 1 && names.forall(_.startsWith("member"))
     }
+
+    private def convertRecord(gr: GenericRecord, sparkSchema: StructType): InternalRow = {
+//      if(isUnion(sparkSchema)) {
+        // When dealing with union types, in order for the Spark schema and the constructed
+        // data hierarchy to match, we have to introduce an intermediate container.
+//        ???
+//      }
+//      else {
+        val fieldDataWithType = gr.getSchema.getFields
+          .map { field ⇒
+            val fieldValue = gr.get(field.name())
+            val sparkType = sparkSchema(field.name()).dataType
+            (fieldValue, sparkType)
+          }
+          .map(fieldConverter)
+        new GenericInternalRow(fieldDataWithType.toArray)
+      }
+//    }
 
     override protected def nullSafeEval(input: Any): InternalRow = {
       val avroRecord = input.asInstanceOf[GenericRecord]
-      // We can't rely on the already computed Spark schema (as declared by DataType)
-      // because UNION types result in a change in structure
-      val sqlType = SchemaConverters.toSqlType(avroRecord.getSchema)
-
-
-      convertRecord(avroRecord, sqlType.dataType.asInstanceOf[StructType])
+      convertRecord(avroRecord, sparkSchema)
     }
   }
 
