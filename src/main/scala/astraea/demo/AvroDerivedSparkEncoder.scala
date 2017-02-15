@@ -6,19 +6,19 @@ import com.databricks.spark.avro.SchemaConverters
 import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.Schema.Type
 import org.apache.avro.generic.GenericData.Fixed
-import org.apache.avro.generic.{GenericData, GenericRecord}
+import org.apache.avro.generic.GenericRecord
 import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, Literal, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.catalyst.{InternalRow, ScalaReflection}
 import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters.iterableAsScalaIterableConverter
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
-import scala.util.Try
 
 /**
  * Spark SQL [[Encoder]] derived from an existing GeoTrellis [[AvroRecordCodec]].
@@ -72,13 +72,11 @@ object AvroDerivedSparkEncoder {
       val result = codec.encode(obj)
       // XXX: The problem here is that if a union type is involved, the intermediate
       // array representation is removed in the value but not in the spark schema.
-      //result.getSchema.addProp("rootSchema", avroRootSchema)
       val avroSchema = codec.schema
       if(avroSchema.getType == Type.UNION) {
-        //val index = GenericData.get().resolveUnion(avroSchema, input)
-        result
+        println(s">> UNION: \n$avroSchema\n$result")
       }
-      else result
+      result
     }
 
     override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
@@ -90,8 +88,9 @@ object AvroDerivedSparkEncoder {
     override def dataType: DataType = sparkSchema
 
     private def convertAny(data: Any, fieldType: DataType): Any = (data, fieldType) match {
+      case (null, _) ⇒ null
       case (av, _: NumericType) ⇒ av
-      case (sv, _: StringType) ⇒ sv
+      case (sv, _: StringType) ⇒ UTF8String.fromString(String.valueOf(sv))
       case (bv, _: BooleanType) ⇒ bv
       case (rv: GenericRecord, st: StructType) ⇒ convertRecord(rv, st)
       case (av: ByteBuffer, at: ArrayType) ⇒ av.array()
@@ -114,22 +113,15 @@ object AvroDerivedSparkEncoder {
     }
 
     private def convertRecord(gr: GenericRecord, sparkSchema: StructType): InternalRow = {
-//      if(isUnion(sparkSchema)) {
-        // When dealing with union types, in order for the Spark schema and the constructed
-        // data hierarchy to match, we have to introduce an intermediate container.
-//        ???
-//      }
-//      else {
-        val fieldDataWithType = gr.getSchema.getFields
-          .map { field ⇒
-            val fieldValue = gr.get(field.name())
-            val sparkType = sparkSchema(field.name()).dataType
-            (fieldValue, sparkType)
-          }
-          .map(fieldConverter)
-        new GenericInternalRow(fieldDataWithType.toArray)
-      }
-//    }
+      val fieldDataWithType = gr.getSchema.getFields
+        .map { field ⇒
+          val fieldValue = gr.get(field.name())
+          val sparkType = sparkSchema(field.name()).dataType
+          (fieldValue, sparkType)
+        }
+        .map(fieldConverter)
+      new GenericInternalRow(fieldDataWithType.toArray)
+    }
 
     override protected def nullSafeEval(input: Any): InternalRow = {
       val avroRecord = input.asInstanceOf[GenericRecord]
@@ -176,10 +168,4 @@ object AvroDerivedSparkEncoder {
 
   // TODO: This definitely needs to be defined properly for encoder chaining to work (e.g. tuples or products)
   def deserializerFor[T : AvroRecordCodec]: Expression = Literal("TODO")
-
-  // See:
-  /*
-  org.apache.spark.sql.catalyst.ScalaReflection#serializerFor
-   */
-
 }

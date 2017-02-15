@@ -5,32 +5,68 @@ import java.time.ZonedDateTime
 import geotrellis.proj4.LatLng
 import geotrellis.raster.{ByteArrayTile, Tile}
 import geotrellis.spark.TemporalProjectedExtent
-import geotrellis.spark.io.avro.AvroRecordCodec
-import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers, Outcome}
 import geotrellis.spark.io.avro.codecs.Implicits._
+import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
 import geotrellis.vector.Extent
+import org.apache.avro.generic.GenericRecord
+import org.apache.avro.{Schema, SchemaBuilder}
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.scalatest.{FunSpec, Matchers}
 
 import scala.reflect.runtime.universe._
 
 /**
- *
+ * Test rig for [[AvroDerivedSparkEncoder]].
  * @author sfitch 
  * @since 2/13/17
  */
 class AvroDerivedSparkEncoderSpec extends FunSpec
   with Matchers with TestEnvironment with TemporalProjectedExtentCodec {
+
+  import AvroDerivedSparkEncoderSpec._
   import sql.implicits._
 
-  // Test values
-  val extent = Extent(1, 2, 3, 4)
-  val tpe = TemporalProjectedExtent(extent, LatLng, ZonedDateTime.now())
-  val tile: Tile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
-
-  def encoderOf[T: AvroRecordCodec: TypeTag] =
-    AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
+  def roundTrip[T](value: T, codec: AvroRecordCodec[T]) =
+    assert(codec.decode(codec.encode(value)) === value)
 
   describe("Avro-derived encoding") {
+    it("should handle double wrapping") {
+
+      roundTrip(DoubleWrapper(47.56), DoubleCodec)
+
+      implicit val enc = encoderOf[DoubleWrapper]
+      val example = DoubleWrapper(util.Random.nextGaussian())
+      val ds = sc.makeRDD(Seq(example)).toDF()
+
+      assert(ds.head().getAs[Row](0).get(0) === example.payload)
+
+    }
+
+    it("should handle string wrapping") {
+      roundTrip(StringWrapper("foobarbaz"), StringCodec)
+
+      // Now through Spark.
+      implicit val enc = encoderOf[StringWrapper]
+      val example = StringWrapper(util.Random.nextString(10))
+      val ds = sc.makeRDD(Seq(example)).toDF()
+
+      assert(ds.head().getAs[Row](0).get(0) === example.payload)
+    }
+
+    it("should handle union of wrappers") {
+      val ex1 = DoubleWrapper(55.6)
+      val ex2 = StringWrapper("nanunanu")
+      roundTrip(ex1, StringOrDoubleCodec)
+      roundTrip(ex2, StringOrDoubleCodec)
+
+      // Explicit type parameters necessary, otherwise Encoder[Product]` will be resolved.
+      implicit val enc = encoderOf[Wrapper](StringOrDoubleCodec, typeTag[Wrapper])
+
+      val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDF()
+      ds.show(false)
+    }
+
     it("should handle Extent") {
 
       implicit val enc = encoderOf[Extent]
@@ -78,4 +114,48 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
     }
 
   }
+}
+
+object AvroDerivedSparkEncoderSpec {
+  // Test values
+  val extent = Extent(1, 2, 3, 4)
+  val tpe = TemporalProjectedExtent(extent, LatLng, ZonedDateTime.now())
+  val tile: Tile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
+
+  def encoderOf[T: AvroRecordCodec: TypeTag] =
+    AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
+
+  trait Wrapper
+  case class StringWrapper(payload: String) extends Wrapper
+  implicit object StringCodec extends AvroRecordCodec[StringWrapper] {
+    override def schema: Schema = SchemaBuilder
+      .record("StringWrapper")
+      .fields()
+      .name("payload").`type`.stringType().noDefault()
+      .endRecord()
+
+    override def encode(thing: StringWrapper, rec: GenericRecord): Unit =
+      rec.put("payload", thing.payload)
+
+    override def decode(rec: GenericRecord): StringWrapper =
+      StringWrapper(rec.get("payload").asInstanceOf[String])
+  }
+
+  case class DoubleWrapper(payload: Double) extends Wrapper
+  implicit object DoubleCodec extends AvroRecordCodec[DoubleWrapper] {
+    override def schema: Schema = SchemaBuilder
+      .record("DoubleWrapper")
+      .fields()
+      .name("payload").`type`.doubleType().noDefault()
+      .endRecord()
+
+    override def encode(thing: DoubleWrapper, rec: GenericRecord): Unit =
+      rec.put("payload", thing.payload)
+
+    override def decode(rec: GenericRecord): DoubleWrapper =
+      DoubleWrapper(rec.get("payload").asInstanceOf[Double])
+  }
+
+  implicit object StringOrDoubleCodec extends AvroUnionCodec[Wrapper](StringCodec, DoubleCodec)
+
 }
