@@ -30,21 +30,23 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
   def roundTrip[T](value: T, codec: AvroRecordCodec[T]) =
     assert(codec.decode(codec.encode(value)) === value)
 
-  describe("Avro-derived encoding") {
+
+  describe("Avro-derived coding") {
     it("should handle double wrapping") {
-
-      roundTrip(DoubleWrapper(47.56), DoubleCodec)
-
+      roundTrip(DoubleWrapper(47.56), DoubleWrapper.Codec)
       implicit val enc = encoderOf[DoubleWrapper]
       val example = DoubleWrapper(util.Random.nextGaussian())
-      val ds = sc.makeRDD(Seq(example)).toDF()
 
-      assert(ds.head().getAs[Row](0).get(0) === example.payload)
+      val ds = sc.makeRDD(Seq(example)).toDS()
+      assert(ds.toDF().head().getAs[Row](0).get(0) === example.payload)
 
+      withClue("Type-safe decoding") {
+        assert(ds.head() === example)
+      }
     }
 
     it("should handle string wrapping") {
-      roundTrip(StringWrapper("foobarbaz"), StringCodec)
+      roundTrip(StringWrapper("foobarbaz"), StringWrapper.Codec)
 
       // Now through Spark.
       implicit val enc = encoderOf[StringWrapper]
@@ -57,11 +59,11 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
     it("should handle union of wrappers") {
       val ex1 = DoubleWrapper(55.6)
       val ex2 = StringWrapper("nanunanu")
-      roundTrip(ex1, StringOrDoubleCodec)
-      roundTrip(ex2, StringOrDoubleCodec)
+      roundTrip(ex1, Wrapper.StringOrDoubleCodec)
+      roundTrip(ex2, Wrapper.StringOrDoubleCodec)
 
-      // Explicit type parameters necessary, otherwise Encoder[Product]` will be resolved.
-      implicit val enc = encoderOf[Wrapper](StringOrDoubleCodec, typeTag[Wrapper])
+      // Explicit type parameters necessary, otherwise `Encoder[Product]` will be resolved.
+      implicit val enc = encoderOf[Wrapper]//(StringOrDoubleCodec, typeTag[Wrapper])
 
       val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDF()
       ds.show(false)
@@ -126,36 +128,41 @@ object AvroDerivedSparkEncoderSpec {
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
 
   trait Wrapper
+  object Wrapper {
+    implicit object StringOrDoubleCodec extends AvroUnionCodec[Wrapper](StringWrapper.Codec, DoubleWrapper.Codec)
+  }
+
   case class StringWrapper(payload: String) extends Wrapper
-  implicit object StringCodec extends AvroRecordCodec[StringWrapper] {
-    override def schema: Schema = SchemaBuilder
-      .record("StringWrapper")
-      .fields()
-      .name("payload").`type`.stringType().noDefault()
-      .endRecord()
+  object StringWrapper {
+    implicit object Codec extends AvroRecordCodec[StringWrapper] {
+      override def schema: Schema = SchemaBuilder
+        .record("StringWrapper")
+        .fields()
+        .name("payload").`type`.stringType().noDefault()
+        .endRecord()
 
-    override def encode(thing: StringWrapper, rec: GenericRecord): Unit =
-      rec.put("payload", thing.payload)
+      override def encode(thing: StringWrapper, rec: GenericRecord): Unit =
+        rec.put("payload", thing.payload)
 
-    override def decode(rec: GenericRecord): StringWrapper =
-      StringWrapper(rec.get("payload").asInstanceOf[String])
+      override def decode(rec: GenericRecord): StringWrapper =
+        StringWrapper(rec.get("payload").asInstanceOf[String])
+    }
   }
 
   case class DoubleWrapper(payload: Double) extends Wrapper
-  implicit object DoubleCodec extends AvroRecordCodec[DoubleWrapper] {
-    override def schema: Schema = SchemaBuilder
-      .record("DoubleWrapper")
-      .fields()
-      .name("payload").`type`.doubleType().noDefault()
-      .endRecord()
+  object DoubleWrapper {
+    implicit object Codec extends AvroRecordCodec[DoubleWrapper] {
+      override def schema: Schema = SchemaBuilder
+        .record("DoubleWrapper")
+        .fields()
+        .name("payload").`type`.doubleType().noDefault()
+        .endRecord()
 
-    override def encode(thing: DoubleWrapper, rec: GenericRecord): Unit =
-      rec.put("payload", thing.payload)
+      override def encode(thing: DoubleWrapper, rec: GenericRecord): Unit =
+        rec.put("payload", thing.payload)
 
-    override def decode(rec: GenericRecord): DoubleWrapper =
-      DoubleWrapper(rec.get("payload").asInstanceOf[Double])
+      override def decode(rec: GenericRecord): DoubleWrapper =
+        DoubleWrapper(rec.get("payload").asInstanceOf[Double])
+    }
   }
-
-  implicit object StringOrDoubleCodec extends AvroUnionCodec[Wrapper](StringCodec, DoubleCodec)
-
 }
