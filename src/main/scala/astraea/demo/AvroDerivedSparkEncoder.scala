@@ -166,7 +166,8 @@ object AvroDerivedSparkEncoder {
       //case (bv: Fixed, bt: BinaryType) ⇒
         // Notes in spark-avro indicate that the buffer behind Fixed is shared and needs to be cloned.
 //        bv.bytes().clone()
-      //case (bv: ByteBuffer, bt: BinaryType) ⇒ bv.array()
+      case (bv: Array[Byte], bt: BinaryType) ⇒ ByteBuffer.wrap(bv)
+
       case (v, t) ⇒
         throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
     }

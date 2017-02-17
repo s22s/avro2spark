@@ -3,14 +3,14 @@ package astraea.demo
 import java.time.ZonedDateTime
 
 import geotrellis.proj4.LatLng
-import geotrellis.raster.{ByteArrayTile, Tile}
+import geotrellis.raster.{BitConstantTile, ByteArrayTile, Tile, TileFeature}
 import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.spark.io.avro.codecs.Implicits._
 import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
 import geotrellis.vector.Extent
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 
@@ -21,8 +21,7 @@ import scala.reflect.runtime.universe._
  * @author sfitch 
  * @since 2/13/17
  */
-class AvroDerivedSparkEncoderSpec extends FunSpec
-  with Matchers with TestEnvironment with TemporalProjectedExtentCodec {
+class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnvironment {
 
   import AvroDerivedSparkEncoderSpec._
   import sql.implicits._
@@ -34,6 +33,7 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
   describe("Avro-derived coding") {
     it("should handle double wrapping") {
       roundTrip(DoubleWrapper(47.56), DoubleWrapper.Codec)
+
       implicit val enc = encoderOf[DoubleWrapper]
       val example = DoubleWrapper(util.Random.nextGaussian())
 
@@ -87,14 +87,11 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
 
       withClue("decoding") {
         assert(ds.head() === extent)
+        assert(ds.map(_.xmax).head() === 3.0)
+        val extIn = ds.rdd.collect().head
+        assert(extent === extIn)
       }
-
-      // When deserilizers are implemented.
-      //assert(ds.map(_.xmax).head() === 3.0)
-//      val extIn = df.rdd.head()
-//      assert(extent === extIn)
     }
-
 
     it("should handle TemporalProjectedExtent") {
       implicit val enc = encoderOf[TemporalProjectedExtent]
@@ -114,15 +111,40 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
       }
     }
 
-    it("should handle Tile") {
+    it("should handle constant Tile") {
+      // This is doesn't actually use our code since the constant tiles
+      // are `Product` types, which already have Encoders.
+      val ds = sc.makeRDD(Seq(constantTile)).toDS
+      assert(ds.filter(_.rows == 2).head() === constantTile)
+    }
+
+    it("should handle ByteArrayTile") {
+      implicit val enc = encoderOf[ByteArrayTile]
+
+      val ds = sc.makeRDD(Seq(arrayTile)).toDS
+
+      assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
+    }
+
+    it("should handle generic Tile") {
       implicit val enc = encoderOf[Tile]
 
-      val ds = sc.makeRDD(Seq(tile)).toDS
+      val ds = sc.makeRDD(Seq(arrayTile: Tile)).toDS
+
+      ds.show(false)
+
+      assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
+    }
+
+
+    it("should handle TileFeature") {
+      implicit val enc = encoderOf[TileFeature[BitConstantTile, StringWrapper]]
+
+      val ds = sc.makeRDD(Seq(tileFeature)).toDS
 
       ds.printSchema()
       ds.show(false)
-
-      println(ds.head())
+      assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
     }
   }
 }
@@ -131,7 +153,11 @@ object AvroDerivedSparkEncoderSpec {
   // Test values
   val extent = Extent(1, 2, 3, 4)
   val tpe = TemporalProjectedExtent(extent, LatLng, ZonedDateTime.now())
-  val tile: Tile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
+
+  val arrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
+
+  val constantTile = BitConstantTile(1, 2, 2)
+  val tileFeature = TileFeature(constantTile, StringWrapper("beepbob"))
 
   def encoderOf[T: AvroRecordCodec: TypeTag] =
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]

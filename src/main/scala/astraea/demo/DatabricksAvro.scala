@@ -9,11 +9,10 @@ import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.vector.Extent
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.functions._
 
 import scala.beans.BeanProperty
 
-object DatabricksAvro extends TemporalProjectedExtentCodec {
+object DatabricksAvro {
 
   private val counter = new AtomicInteger(0)
 
@@ -44,8 +43,6 @@ object DatabricksAvro extends TemporalProjectedExtentCodec {
 
     @transient
     val sc = spark.sparkContext
-
-
 
     implicit val tpeEncoder = AvroDerivedSparkEncoder[TemporalProjectedExtent]
     implicit val mbtEncoder = AvroDerivedSparkEncoder[MultibandTile]
