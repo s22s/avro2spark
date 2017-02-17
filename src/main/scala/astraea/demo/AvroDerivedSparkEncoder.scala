@@ -12,7 +12,7 @@ import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, Literal, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.catalyst.{InternalRow, ScalaReflection}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
@@ -77,7 +77,7 @@ object AvroDerivedSparkEncoder {
       // array representation is removed in the value but not in the spark schema.
       val avroSchema = codec.schema
       if(avroSchema.getType == Type.UNION) {
-        println(s">> UNION: \n$avroSchema\n$result")
+        println(s">> union misalignment: \n\t$result\n>> should conform to\n\t$avroSchema")
       }
       result
     }
@@ -160,14 +160,7 @@ object AvroDerivedSparkEncoder {
       case (sv, _: StringType) ⇒ sv.toString
       case (bv, _: BooleanType) ⇒ bv
       case (rv: InternalRow, st: StructType) ⇒ convertRow(rv, st, avroField.schema())
-      //case (av: ByteBuffer, at: ArrayType) ⇒ av.array()
-      //case (av: java.lang.Iterable[_], at: ArrayType) ⇒
-        //av.asScala.map(e ⇒ convertField(e, at.elementType))
-      //case (bv: Fixed, bt: BinaryType) ⇒
-        // Notes in spark-avro indicate that the buffer behind Fixed is shared and needs to be cloned.
-//        bv.bytes().clone()
       case (bv: Array[Byte], bt: BinaryType) ⇒ ByteBuffer.wrap(bv)
-
       case (v, t) ⇒
         throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
     }
@@ -177,7 +170,6 @@ object AvroDerivedSparkEncoder {
     private def convertRow(row: InternalRow, rowSchema: StructType, recordSchema: Schema): GenericRecord = {
       val fieldData = rowSchema.fields.zipWithIndex
         .map { case (field, i) ⇒
-          //val recordField = recordSchema.getField(field.name)
           val name = field.name
           val avroField = recordSchema.getField(name)
           val sparkValue = row.get(i, field.dataType)
@@ -185,7 +177,6 @@ object AvroDerivedSparkEncoder {
           (name, (sparkValue, sparkType, avroField))
         }
         .map(f ⇒ (f._1, fieldConverter(f._2)))
-
 
       val rec = new GenericData.Record(recordSchema)
       fieldData.foreach { case (name, value) ⇒
@@ -235,7 +226,6 @@ object AvroDerivedSparkEncoder {
     inputObject: Expression, schema: StructType): Expression =
     AvroToSpark(EncodeToAvro(inputObject), schema)
 
-  // TODO: This definitely needs to be defined properly for encoder chaining to work (e.g. tuples or products)
   def deserializerFor[T : AvroRecordCodec: TypeTag](schema: StructType): Expression =
     DecodeFromAvro(SparkToAvro(GetColumnByOrdinal(0, schema), schema))
 }

@@ -10,7 +10,7 @@ import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
 import geotrellis.vector.Extent
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.{Row}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 
@@ -66,11 +66,13 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       roundTrip(ex1, Wrapper.StringOrDoubleCodec)
       roundTrip(ex2, Wrapper.StringOrDoubleCodec)
 
-      // Explicit type parameters necessary, otherwise `Encoder[Product]` will be resolved.
-      implicit val enc = encoderOf[Wrapper]//(StringOrDoubleCodec, typeTag[Wrapper])
+      implicit val enc = encoderOf[Wrapper]
 
       val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDF()
       ds.show(false)
+
+      // TODO: Write test when unions work.
+      assert(false)
     }
 
     it("should handle Extent") {
@@ -129,6 +131,8 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
     it("should handle generic Tile") {
       implicit val enc = encoderOf[Tile]
 
+      // TODO: This fails because unions fail.
+
       val ds = sc.makeRDD(Seq(arrayTile: Tile)).toDS
 
       ds.show(false)
@@ -136,14 +140,11 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
     }
 
-
     it("should handle TileFeature") {
       implicit val enc = encoderOf[TileFeature[BitConstantTile, StringWrapper]]
 
       val ds = sc.makeRDD(Seq(tileFeature)).toDS
 
-      ds.printSchema()
-      ds.show(false)
       assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
     }
   }
