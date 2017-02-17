@@ -40,7 +40,7 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
       val ds = sc.makeRDD(Seq(example)).toDS()
       assert(ds.toDF().head().getAs[Row](0).get(0) === example.payload)
 
-      withClue("Type-safe decoding") {
+      withClue("decoding") {
         assert(ds.head() === example)
       }
     }
@@ -51,9 +51,13 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
       // Now through Spark.
       implicit val enc = encoderOf[StringWrapper]
       val example = StringWrapper(util.Random.nextString(10))
-      val ds = sc.makeRDD(Seq(example)).toDF()
+      val ds = sc.makeRDD(Seq(example)).toDS()
 
-      assert(ds.head().getAs[Row](0).get(0) === example.payload)
+      assert(ds.toDF().head().getAs[Row](0).get(0) === example.payload)
+
+      withClue("decoding") {
+        assert(ds.head() === example)
+      }
     }
 
     it("should handle union of wrappers") {
@@ -81,9 +85,13 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
 
       assert(ds.select(field).as[Double].head() === extent.xmax)
 
+      withClue("decoding") {
+        assert(ds.head() === extent)
+      }
+
       // When deserilizers are implemented.
       //assert(ds.map(_.xmax).head() === 3.0)
-//      val extIn = df.rdd.collect().head
+//      val extIn = df.rdd.head()
 //      assert(extent === extIn)
     }
 
@@ -93,9 +101,6 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
 
       val ds = sc.makeRDD(Seq(tpe)).toDS
 
-      ds.printSchema()
-      ds.show(false)
-
       val field1 = ds(ds.columns.head).getItem("epsg")
 
       assert(ds.select(field1).as[Double].head === tpe.crs.epsgCode.get)
@@ -103,6 +108,10 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
       val field2 = ds(ds.columns.head).getItem("extent").getItem("ymax")
 
       assert(ds.select(field2).as[Double].head === tpe.extent.ymax)
+
+      withClue("decoding"){
+        assert(ds.head() === tpe)
+      }
     }
 
     it("should handle Tile") {
@@ -113,8 +122,8 @@ class AvroDerivedSparkEncoderSpec extends FunSpec
       ds.printSchema()
       ds.show(false)
 
+      println(ds.head())
     }
-
   }
 }
 

@@ -154,12 +154,12 @@ object AvroDerivedSparkEncoder {
 
     override def dataType: DataType = dataTypeFor[GenericRecord]
 
-    private def convertField(data: Any, fieldType: DataType): Any = (data, fieldType) match {
+    private def convertField(data: Any, fieldType: DataType, avroField: Schema.Field): Any = (data, fieldType) match {
       case (null, _) ⇒ null
       case (av, _: NumericType) ⇒ av
       case (sv, _: StringType) ⇒ sv.toString
       case (bv, _: BooleanType) ⇒ bv
-      case (rv: InternalRow, st: StructType) ⇒ convertField(rv, st)
+      case (rv: InternalRow, st: StructType) ⇒ convertRow(rv, st, avroField.schema())
       //case (av: ByteBuffer, at: ArrayType) ⇒ av.array()
       //case (av: java.lang.Iterable[_], at: ArrayType) ⇒
         //av.asScala.map(e ⇒ convertField(e, at.elementType))
@@ -178,9 +178,10 @@ object AvroDerivedSparkEncoder {
         .map { case (field, i) ⇒
           //val recordField = recordSchema.getField(field.name)
           val name = field.name
+          val avroField = recordSchema.getField(name)
           val sparkValue = row.get(i, field.dataType)
           val sparkType = rowSchema(field.name).dataType
-          (name, (sparkValue, sparkType))
+          (name, (sparkValue, sparkType, avroField))
         }
         .map(f ⇒ (f._1, fieldConverter(f._2)))
 
