@@ -4,13 +4,14 @@ import java.time.ZonedDateTime
 
 import geotrellis.proj4.LatLng
 import geotrellis.raster.{BitConstantTile, ByteArrayTile, Tile, TileFeature}
-import geotrellis.spark.TemporalProjectedExtent
+import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.spark.io.avro.codecs.Implicits._
+import geotrellis.spark.io.avro.codecs.KeyValueRecordCodec
 import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
 import geotrellis.vector.Extent
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.spark.sql.{Row}
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 
@@ -95,6 +96,37 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       }
     }
 
+    it("should handle SpatialKey") {
+      implicit val enc = encoderOf[SpatialKey]
+
+      val ds = sc.makeRDD(Seq(sk)).toDS
+
+      val field = ds(ds.columns.head).getItem("row")
+
+      assert(ds.select(field).as[Double].head === sk.row)
+
+      withClue("decoding") {
+        ds.head() === sk
+      }
+    }
+
+    it("should handle SpaceTimeKey") {
+      implicit val enc = encoderOf[SpaceTimeKey]
+
+      val ds = sc.makeRDD(Seq(stk)).toDS
+
+      ds.printSchema()
+      ds.show(false)
+
+      val field = ds(ds.columns.head).getItem("instant")
+
+      assert(ds.select(field).as[Double].head === stk.instant)
+
+      withClue("decoding") {
+        ds.head() === stk
+      }
+    }
+
     it("should handle TemporalProjectedExtent") {
       implicit val enc = encoderOf[TemporalProjectedExtent]
 
@@ -113,10 +145,28 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       }
     }
 
+    it("should handle KeyValueRecordCodec") {
+      implicit val avroKV = KeyValueRecordCodec[SpatialKey, DoubleWrapper]
+      implicit val enc = encoderOf[Vector[(SpatialKey, DoubleWrapper)]]
+
+      val keyVals = Vector((sk, oneThird), (SpatialKey(99, 100), DoubleWrapper(1.0)))
+      val ds = sc.makeRDD(Seq(keyVals)).toDS
+
+      ds.printSchema()
+      ds.show(false)
+
+      assert(ds.selectExpr("Vector.pairs[0]._2.payload").as[Double].head === oneThird.payload)
+
+      withClue("decoding") {
+        assert(ds.head() === keyVals)
+      }
+    }
+
     it("should handle constant Tile") {
-      // This is doesn't actually use our code since the constant tiles
-      // are `Product` types, which already have Encoders.
-      val ds = sc.makeRDD(Seq(constantTile)).toDS
+      // We have to force the use of our encoder in this case because `ConstantTile`s
+      // are `Product` types, which already have `Encoder`s.
+      val enc = encoderOf[BitConstantTile]
+      val ds = rddToDatasetHolder(sc.makeRDD(Seq(constantTile)))(enc).toDS
       assert(ds.filter(_.rows == 2).head() === constantTile)
     }
 
@@ -150,10 +200,14 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
   }
 }
 
+/** Test support bits */
 object AvroDerivedSparkEncoderSpec {
-  // Test values
+  val oneThird = DoubleWrapper(1.0/3.0)
+  val instant = ZonedDateTime.now()
   val extent = Extent(1, 2, 3, 4)
-  val tpe = TemporalProjectedExtent(extent, LatLng, ZonedDateTime.now())
+  val sk = SpatialKey(37, 41)
+  val stk = SpaceTimeKey(sk, instant)
+  val tpe = TemporalProjectedExtent(extent, LatLng, instant)
 
   val arrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
 

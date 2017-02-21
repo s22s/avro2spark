@@ -13,12 +13,13 @@ import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
 import org.apache.spark.sql.catalyst.expressions.{BoundReference, Expression, GenericInternalRow, NonSQLExpression, UnaryExpression}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData}
 import org.apache.spark.sql.catalyst.{InternalRow, ScalaReflection}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.collection.JavaConversions._
-import scala.collection.JavaConverters.iterableAsScalaIterableConverter
+import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
 
@@ -112,24 +113,19 @@ object AvroDerivedSparkEncoder {
       case (sv, _: StringType) ⇒ UTF8String.fromString(String.valueOf(sv))
       case (bv, _: BooleanType) ⇒ bv
       case (rv: GenericRecord, st: StructType) ⇒ convertRecord(rv, st)
-      case (av: ByteBuffer, at: ArrayType) ⇒ av.array()
+      case (av: ByteBuffer, _: ArrayType) ⇒ av.array()
       case (av: java.lang.Iterable[_], at: ArrayType) ⇒
-        av.asScala.map(e ⇒ convertField(e, at.elementType))
+        new GenericArrayData(av.asScala.map(e ⇒ convertField(e, at.elementType)))
       case (bv: Fixed, bt: BinaryType) ⇒
-        // Notes in spark-avro indicate that the buffer behind Fixed is shared and needs to be cloned.
+        // Notes in spark-avro indicate that the buffer behind Fixed
+        // is shared and needs to be cloned.
         bv.bytes().clone()
-      case (bv: ByteBuffer, bt: BinaryType) ⇒ bv.array()
+      case (bv: ByteBuffer, _: BinaryType) ⇒ bv.array()
       case (v, t) ⇒
         throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
     }
 
     private val fieldConverter = (convertField _).tupled
-
-    /** Using convention used in spark-avro, guess at whether or not we're dealing with a union type. */
-    private def isUnion(sparkSchema: StructType) = {
-      val names = sparkSchema.fieldNames
-      names.length > 1 && names.forall(_.startsWith("member"))
-    }
 
     private def convertRecord(gr: GenericRecord, rowSchema: StructType): InternalRow = {
       val fieldData = gr.getSchema.getFields
@@ -154,13 +150,29 @@ object AvroDerivedSparkEncoder {
 
     override def dataType: DataType = dataTypeFor[GenericRecord]
 
-    private def convertField(data: Any, fieldType: DataType, avroField: Schema.Field): Any = (data, fieldType) match {
+    private def convertField(data: Any, fieldType: DataType, avroSchema: Schema): Any = (data, fieldType) match {
       case (null, _) ⇒ null
       case (av, _: NumericType) ⇒ av
       case (sv, _: StringType) ⇒ sv.toString
       case (bv, _: BooleanType) ⇒ bv
-      case (rv: InternalRow, st: StructType) ⇒ convertRow(rv, st, avroField.schema())
+      case (rv: InternalRow, st: StructType) ⇒ convertRow(rv, st, avroSchema)
       case (bv: Array[Byte], bt: BinaryType) ⇒ ByteBuffer.wrap(bv)
+      case (av: ArrayData, at: ArrayType) ⇒
+        val elementType = at.elementType
+        elementType match {
+          case st: StructType ⇒
+            val avroArray = new GenericData.Array[GenericRecord](av.numElements(), avroSchema)
+            av.foreach(elementType, {
+              case (_, element: InternalRow) ⇒
+                val convertedElement = convertRow(element, st, avroSchema.getElementType)
+                avroArray.add(convertedElement)
+            })
+            avroArray
+          case _ ⇒
+            throw new NotImplementedError(
+              s"Mapping '${av}' with element '${elementType}' to '${at}' needs to be implemented.")
+        }
+
       case (v, t) ⇒
         throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
     }
@@ -174,7 +186,7 @@ object AvroDerivedSparkEncoder {
           val avroField = recordSchema.getField(name)
           val sparkValue = row.get(i, field.dataType)
           val sparkType = rowSchema(field.name).dataType
-          (name, (sparkValue, sparkType, avroField))
+          (name, (sparkValue, sparkType, avroField.schema()))
         }
         .map(f ⇒ (f._1, fieldConverter(f._2)))
 
