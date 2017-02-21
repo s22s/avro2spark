@@ -1,5 +1,6 @@
 package astraea.demo
 
+import java.nio.file.Files
 import java.time.ZonedDateTime
 
 import geotrellis.proj4.LatLng
@@ -8,13 +9,18 @@ import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.spark.io.avro.codecs.Implicits._
 import geotrellis.spark.io.avro.codecs.KeyValueRecordCodec
 import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
-import geotrellis.vector.Extent
+import geotrellis.vector.{Extent, ProjectedExtent}
+import geotrellis.vectortile.VectorTile
+import geotrellis.vectortile.protobuf.ProtobufTile
+import geotrellis.vectortile.protobuf.internal.vector_tile.VectorTileProto
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
+import org.apache.commons.io.IOUtils
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 
+import scala.io.Source
 import scala.reflect.runtime.universe._
 
 /**
@@ -145,6 +151,25 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       }
     }
 
+
+    it("should handle ProjectedExtent") {
+      implicit val enc = encoderOf[ProjectedExtent]
+
+      val ds = sc.makeRDD(Seq(pe)).toDS
+
+      val field1 = ds(ds.columns.head).getItem("epsg")
+
+      assert(ds.select(field1).as[Double].head === tpe.crs.epsgCode.get)
+
+      val field2 = ds(ds.columns.head).getItem("extent").getItem("ymax")
+
+      assert(ds.select(field2).as[Double].head === tpe.extent.ymax)
+
+      withClue("decoding"){
+        assert(ds.head() === pe)
+      }
+    }
+
     it("should handle KeyValueRecordCodec") {
       implicit val avroKV = KeyValueRecordCodec[SpatialKey, DoubleWrapper]
       implicit val enc = encoderOf[Vector[(SpatialKey, DoubleWrapper)]]
@@ -176,6 +201,8 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       val ds = sc.makeRDD(Seq(arrayTile)).toDS
 
       assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
+
+      // TODO: Decoding
     }
 
     it("should handle generic Tile") {
@@ -197,6 +224,21 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
     }
+
+    it("should handle VectorTile") {
+      implicit val enc = encoderOf[VectorTile]
+      val ds = sc.makeRDD(Seq(vectorTile)).toDS
+      ds.printSchema()
+      ds.show(false)
+
+      assert(ds.select("VectorTile.extent.ymax").as[Double].head() === extent.ymax)
+      assert(ds.select("VectorTile.bytes").as[Array[Byte]].head() === vectorTile.asInstanceOf[ProtobufTile].toBytes)
+
+
+      withClue("decoding") {
+        assert(ds.head() === vectorTile)
+      }
+    }
   }
 }
 
@@ -207,12 +249,18 @@ object AvroDerivedSparkEncoderSpec {
   val extent = Extent(1, 2, 3, 4)
   val sk = SpatialKey(37, 41)
   val stk = SpaceTimeKey(sk, instant)
-  val tpe = TemporalProjectedExtent(extent, LatLng, instant)
+  val pe = ProjectedExtent(extent, LatLng)
+  val tpe = TemporalProjectedExtent(pe, instant)
 
   val arrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
 
   val constantTile = BitConstantTile(1, 2, 2)
   val tileFeature = TileFeature(constantTile, StringWrapper("beepbob"))
+
+  lazy val vectorTile = ProtobufTile.fromBytes(
+    IOUtils.toByteArray(getClass.getResourceAsStream("/MultiLayer.mvt")),
+    extent
+  )
 
   def encoderOf[T: AvroRecordCodec: TypeTag] =
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
