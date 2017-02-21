@@ -1,18 +1,16 @@
 package astraea.demo
 
-import java.nio.file.Files
 import java.time.ZonedDateTime
 
 import geotrellis.proj4.LatLng
 import geotrellis.raster.{BitConstantTile, ByteArrayTile, Tile, TileFeature}
-import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.spark.io.avro.codecs.Implicits._
 import geotrellis.spark.io.avro.codecs.KeyValueRecordCodec
 import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
+import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.vector.{Extent, ProjectedExtent}
 import geotrellis.vectortile.VectorTile
 import geotrellis.vectortile.protobuf.ProtobufTile
-import geotrellis.vectortile.protobuf.internal.vector_tile.VectorTileProto
 import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
 import org.apache.commons.io.IOUtils
@@ -20,7 +18,6 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 
-import scala.io.Source
 import scala.reflect.runtime.universe._
 
 /**
@@ -75,11 +72,13 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       implicit val enc = encoderOf[Wrapper]
 
-      val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDF()
+      val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDS()
+      ds.printSchema()
       ds.show(false)
 
-      // TODO: Write test when unions work.
-      assert(false)
+      withClue("decoding") {
+        assert(ds.collect().collect { case d: DoubleWrapper ⇒ d}.head === ex1)
+      }
     }
 
     it("should handle Extent") {
@@ -192,7 +191,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       // are `Product` types, which already have `Encoder`s.
       val enc = encoderOf[BitConstantTile]
       val ds = rddToDatasetHolder(sc.makeRDD(Seq(constantTile)))(enc).toDS
-      assert(ds.filter(_.rows == 2).head() === constantTile)
+      withClue("decoding") {
+        assert(ds.filter(_.rows == 2).head() === constantTile)
+      }
     }
 
     it("should handle ByteArrayTile") {
@@ -202,7 +203,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
 
-      // TODO: Decoding
+      withClue("decoding") {
+        assert(ds.head() === arrayTile)
+      }
     }
 
     it("should handle generic Tile") {
@@ -222,7 +225,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       val ds = sc.makeRDD(Seq(tileFeature)).toDS
 
-      assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
+      withClue("decoding") {
+        assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
+      }
     }
 
     it("should handle VectorTile") {
