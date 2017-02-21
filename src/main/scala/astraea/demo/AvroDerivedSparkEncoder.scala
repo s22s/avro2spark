@@ -39,7 +39,7 @@ object AvroDerivedSparkEncoder {
 
     // Now wondering if `flat` might mean that a single column is expanded into multiple ones?
     // ~~Assuming "flat" means all columns are primitive types. Not really sure.~~
-    val flat = schema.fields.length == 1 && !schema.fields.head.dataType.isInstanceOf[StructType]
+    val flat = false // schema.fields.length == 1 && !schema.fields.head.dataType.isInstanceOf[StructType]
 
     val inputObject = BoundReference(0, dataTypeFor[T], nullable = false)
 
