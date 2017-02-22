@@ -35,21 +35,24 @@ object AvroDerivedSparkEncoder {
   def apply[T: AvroRecordCodec: TypeTag]: Encoder[T] = {
 
     val cls = classTagFor[T]
+
+    // Get the `spark-avro` generated schema
     val schema = schemaFor[T]
 
-    // Now wondering if `flat` might mean that a single column is expanded into multiple ones?
-    // ~~Assuming "flat" means all columns are primitive types. Not really sure.~~
-    val flat = false // schema.fields.length == 1 && !schema.fields.head.dataType.isInstanceOf[StructType]
+    // The results from serialization will be all in one column. This introduces a parent schema
+    // to communicate this grouping mechanism to Catalyst.
+    val wrappedSchema = StructType(Seq(StructField(fieldNameFor[T], schema)))
 
+    // The Catalyst mechanism for creating a to-be-resolved column dependency. This is the input for
+    // the rest of the expression pipeline.
     val inputObject = BoundReference(0, dataTypeFor[T], nullable = false)
 
     val serializer = serializerFor[T](inputObject, schema)
 
     val deserializer = deserializerFor[T](schema)
 
-    // The results from serialization will be all in one column. This introduces a parent schema
-    // to communicate this grouping mechanism.
-    val wrappedSchema = StructType(Seq(StructField(fieldNameFor[T], schema)))
+    // Not sure what this is.... assuming it means that serialization results are spread out over multiple columns.
+    val flat = false
 
     // As of Spark 2.1.0, the `ExpressionEncoder` API is the only publicly accessible means of creating
     // RDD => Dataframe converters. This means using the Catalyst `Expression` API, where an execution
@@ -63,7 +66,15 @@ object AvroDerivedSparkEncoder {
     )
   }
 
-  /** Intermediate expression to convert an incoming expression of type `T` to an Avro [[GenericRecord]]. */
+  /** Constructs the serialization expression. */
+  def serializerFor[T: AvroRecordCodec: TypeTag](inputObject: Expression, schema: StructType): Expression =
+    AvroToSpark(EncodeToAvro(inputObject), schema)
+
+  /** Constructs the deserialization expression. */
+  def deserializerFor[T : AvroRecordCodec: TypeTag](schema: StructType): Expression =
+    DecodeFromAvro(SparkToAvro(GetColumnByOrdinal(0, schema), schema))
+
+  /** Expression to convert an incoming expression of type `T` to an Avro [[GenericRecord]]. */
   case class EncodeToAvro[T: AvroRecordCodec](child: Expression)
     extends UnaryExpression with NonSQLExpression with CodegenFallback {
 
@@ -77,7 +88,8 @@ object AvroDerivedSparkEncoder {
       val obj = input.asInstanceOf[T]
       val result = codec.encode(obj)
       // XXX: The problem here is that if a union type is involved, the intermediate
-      // array representation is removed in the value but not in the spark schema.
+      // array representation is removed in the value but not in the Spark schema.
+      // See https://github.com/databricks/spark-avro#supported-types-for-avro---spark-sql-conversion
       val avroSchema = codec.schema
       if(avroSchema.getType == Type.UNION) {
         println(s">> union misalignment: \n\t$result\n>> should conform to\n\t$avroSchema")
@@ -88,6 +100,7 @@ object AvroDerivedSparkEncoder {
     override protected def otherCopyArgs: Seq[AnyRef] = codec :: Nil
   }
 
+  /** Expression taking input in Avro format and converting into native type `T`. */
   case class DecodeFromAvro[T: AvroRecordCodec: TypeTag](child: Expression)
     extends UnaryExpression with NonSQLExpression with CodegenFallback {
 
@@ -104,6 +117,7 @@ object AvroDerivedSparkEncoder {
       codec :: implicitly[TypeTag[T]] :: Nil
   }
 
+  /** Expression converting Avro record format into the internal Spark format. */
   case class AvroToSpark(child: Expression, sparkSchema: StructType)
     extends UnaryExpression with NonSQLExpression with CodegenFallback {
 
@@ -146,6 +160,7 @@ object AvroDerivedSparkEncoder {
     }
   }
 
+  /** Expression converting the Spark internal representation into Avro records. */
   case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: StructType)
     extends UnaryExpression with NonSQLExpression with CodegenFallback {
     val codec = implicitly[AvroRecordCodec[T]]
@@ -206,6 +221,7 @@ object AvroDerivedSparkEncoder {
     override protected def otherCopyArgs: Seq[AnyRef] = codec :: Nil
   }
 
+  /** Utility to build a ClassTag from a TypeTag. */
   private def classTagFor[T: TypeTag] = {
     val mirror = typeTag[T].mirror
     val tpe = typeTag[T].tpe
@@ -222,6 +238,7 @@ object AvroDerivedSparkEncoder {
    */
   def dataTypeFor[T: TypeTag]: DataType = ScalaReflection.dataTypeFor[T]
 
+  /** Via Databricks' `spark-avro`, convert the Avro schema into a Spark/Catalyst schema. */
   def schemaFor[T: AvroRecordCodec]: StructType = {
     val codec = implicitly[AvroRecordCodec[T]]
 
@@ -234,12 +251,7 @@ object AvroDerivedSparkEncoder {
     }
   }
 
+  /** Generate a field name for the serialized object.  */
   def fieldNameFor[T: TypeTag]: String = classTagFor[T].runtimeClass.getSimpleName
 
-  def serializerFor[T: AvroRecordCodec: TypeTag](
-    inputObject: Expression, schema: StructType): Expression =
-    AvroToSpark(EncodeToAvro(inputObject), schema)
-
-  def deserializerFor[T : AvroRecordCodec: TypeTag](schema: StructType): Expression =
-    DecodeFromAvro(SparkToAvro(GetColumnByOrdinal(0, schema), schema))
 }
