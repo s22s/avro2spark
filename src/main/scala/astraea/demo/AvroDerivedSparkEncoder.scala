@@ -47,6 +47,8 @@ object AvroDerivedSparkEncoder {
 
     val deserializer = deserializerFor[T](schema)
 
+    // The results from serialization will be all in one column. This introduces a parent schema
+    // to communicate this grouping mechanism.
     val wrappedSchema = StructType(Seq(StructField(fieldNameFor[T], schema)))
 
     // As of Spark 2.1.0, the `ExpressionEncoder` API is the only publicly accessible means of creating

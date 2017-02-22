@@ -1,0 +1,62 @@
+@startuml
+hide empty fields
+hide empty methods
+
+
+object AvroDerivedSparkEncoder <<object>> {
+  +apply[T: AvroRecordCodec]: Encoder[T]
+}
+
+package serializer <<Rectangle>> {
+  class EncodeToAvro <T>
+  class AvroToSpark <T>
+}
+
+package deserializer <<Rectangle>> {
+  class DecodeFromAvro <T>
+  class SparkToAvro <T>
+}
+
+package org.apache.spark.sql.catalyst {
+
+  abstract class LeafExpression
+
+  class BoundReference
+
+  interface Expression {
+    + dataType: DataType
+    + eval(input: InternalRow): Any
+  }
+
+  abstract class UnaryExpression {
+    + child: Expression
+    # nullSafeEval(input: Any): Any
+  }
+  interface Encoder <T> {
+    + schema: StructType
+  }
+  class ExpressionEncoder <T>
+}
+
+Expression <|-- UnaryExpression
+LeafExpression -|> Expression
+LeafExpression <|-- BoundReference
+UnaryExpression <|-- EncodeToAvro
+UnaryExpression <|-- AvroToSpark
+UnaryExpression <|-- DecodeFromAvro
+UnaryExpression <|-- SparkToAvro
+
+
+serializer <-- AvroDerivedSparkEncoder: creates
+deserializer <-- AvroDerivedSparkEncoder: creates
+Encoder <|-- ExpressionEncoder
+ExpressionEncoder --> "1..*" serializer: serializer
+ExpressionEncoder --> "1" deserializer: deserializer
+
+BoundReference <- EncodeToAvro: child
+EncodeToAvro <- AvroToSpark: child
+DecodeFromAvro -> SparkToAvro: child
+
+BoundReference <- SparkToAvro: child
+
+@enduml
