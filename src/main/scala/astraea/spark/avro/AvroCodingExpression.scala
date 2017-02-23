@@ -1,4 +1,4 @@
-package astraea.demo
+package astraea.spark.avro
 
 import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.generic.GenericRecord

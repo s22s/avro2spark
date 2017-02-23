@@ -1,4 +1,4 @@
-package astraea.demo
+package astraea.spark.avro
 
 import java.util.concurrent.atomic.AtomicInteger
 

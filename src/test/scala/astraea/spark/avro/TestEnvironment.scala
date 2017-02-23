@@ -14,22 +14,19 @@
  * limitations under the License.
  */
 
-package astraea.demo
+package astraea.spark.avro
 
-import geotrellis.spark.io.hadoop.HdfsUtils
-import geotrellis.spark.util.SparkUtils
-import geotrellis.spark.io.kryo.KryoRegistrator
-import org.apache.hadoop.fs.FileSystem
-import org.apache.hadoop.fs.FileUtil
-import org.apache.hadoop.fs.Path
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.serializer.KryoSerializer
-import org.scalatest._
-import org.scalatest.BeforeAndAfterAll
 import java.io.File
 
+import geotrellis.spark.io.hadoop.HdfsUtils
+import geotrellis.spark.io.kryo.KryoRegistrator
+import geotrellis.spark.util.SparkUtils
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{FileSystem, FileUtil, Path}
+import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.sql.{SQLContext, SparkSession}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.scalatest.{BeforeAndAfterAll, _}
 
 import scala.collection.mutable
 import scala.util.Properties
