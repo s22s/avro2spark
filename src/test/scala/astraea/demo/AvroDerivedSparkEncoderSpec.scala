@@ -120,12 +120,11 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       val ds = sc.makeRDD(Seq(stk)).toDS
 
-      ds.printSchema()
-      ds.show(false)
-
       val field = ds(ds.columns.head).getItem("instant")
 
       assert(ds.select(field).as[Double].head === stk.instant)
+
+      ds.printSchema()
 
       withClue("decoding") {
         ds.head() === stk
@@ -175,9 +174,6 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       val keyVals = Vector((sk, oneThird), (SpatialKey(99, 100), DoubleWrapper(1.0)))
       val ds = sc.makeRDD(Seq(keyVals)).toDS
-
-      ds.printSchema()
-      ds.show(false)
 
       assert(ds.selectExpr("Vector.pairs[0]._2.payload").as[Double].head === oneThird.payload)
 
