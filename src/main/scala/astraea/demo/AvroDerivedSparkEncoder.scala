@@ -5,7 +5,7 @@ import javax.validation.UnexpectedTypeException
 
 import com.databricks.spark.avro.SchemaConverters
 import geotrellis.spark.io.avro.AvroRecordCodec
-import org.apache.avro.Schema
+import org.apache.avro.{Schema, SchemaBuilder}
 import org.apache.avro.Schema.Type
 import org.apache.avro.generic.GenericData.Fixed
 import org.apache.avro.generic.{GenericData, GenericRecord}
@@ -105,7 +105,8 @@ object AvroDerivedSparkEncoder {
     @tailrec
     protected final def convertRecord(input: Input, schema: SchemaPair[StructType]): Output = {
       if(schema.isUnion) {
-        convertRecord(input, resolveUnion(input, schema))
+        val (newInput, newSchema) = resolveUnion(input, schema)
+        convertRecord(newInput, newSchema)
       }
       else {
         val fieldData = schema.fields
@@ -126,7 +127,7 @@ object AvroDerivedSparkEncoder {
 
     protected def convertField(data: Any, schema: SchemaPair[_]): Any
 
-    protected def resolveUnion(input: Input, schema: SchemaPair[StructType]): SchemaPair[StructType]
+    protected def resolveUnion(input: Input, schema: SchemaPair[StructType]): (Input, SchemaPair[StructType])
 
     protected def constructOutput(fieldData: Seq[(FieldSelector, Any)], schema: SchemaPair[_]): Output
   }
@@ -155,7 +156,7 @@ object AvroDerivedSparkEncoder {
         new GenericArrayData(convertedValues)
       case (bv: Fixed, bt: BinaryType) ⇒
         // Notes in spark-avro indicate that the buffer behind Fixed
-        // is shared and needs to be cloned.
+        // is reused and needs to be cloned.
         bv.bytes().clone()
       case (bv: ByteBuffer, _: BinaryType) ⇒ bv.array()
       case (v, t) ⇒
@@ -167,7 +168,8 @@ object AvroDerivedSparkEncoder {
 
     override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
 
-    protected def resolveUnion(input: GenericRecord, schema: SchemaPair[StructType]): SchemaPair[StructType] = {
+    protected def resolveUnion(input: GenericRecord, schema: SchemaPair[StructType]): (GenericRecord, SchemaPair[StructType]) = {
+
       require(schema.isUnion)
       val schemaIndex = schema.avro.getIndexNamed(input.getSchema.getFullName)
       require(schemaIndex != null,
@@ -175,12 +177,20 @@ object AvroDerivedSparkEncoder {
 
       val selectedAvro = schema.avro.getTypes.get(schemaIndex)
       val sparkField = schema.spark.fields(schemaIndex)
-      // println(s"selected '${sparkField}' from '${schema.spark}'")
 
-      sparkField.dataType match {
-        case st: StructType ⇒ SchemaPair(st, selectedAvro)
-        case _ ⇒ throw new UnexpectedTypeException(s"Avro union resolution failed for ${schema}:  ${input}")
-      }
+      val builder = SchemaBuilder
+        .record(selectedAvro.getName + "ResolvedUnion").namespace(selectedAvro.getNamespace)
+        .fields()
+
+      val newSchema = schema.spark.fields.foldRight(builder) {
+        case (field, builder) ⇒ builder.name(field.name).`type`(selectedAvro).withDefault(null)
+      }.endRecord()
+
+      val rec = new GenericData.Record(newSchema)
+
+      rec.put(sparkField.name, input)
+
+      (rec, schema.copy(avro = newSchema))
     }
   }
 
@@ -232,7 +242,7 @@ object AvroDerivedSparkEncoder {
 
     override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
 
-    protected def resolveUnion(input: InternalRow, schema: SchemaPair[StructType]): SchemaPair[StructType] = ???
+    protected def resolveUnion(input: InternalRow, schema: SchemaPair[StructType]) = ???
   }
 
   /** Utility to build a ClassTag from a TypeTag. */
