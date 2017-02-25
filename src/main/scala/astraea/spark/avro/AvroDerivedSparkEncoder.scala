@@ -13,7 +13,7 @@ import scala.reflect.runtime.universe._
 /**
  * Spark SQL [[Encoder]] derived from an existing GeoTrellis [[AvroRecordCodec]].
  *
- * @author sfitch 
+ * @author sfitch (@metasim)
  * @since 2/7/17
  */
 object AvroDerivedSparkEncoder {
@@ -39,6 +39,7 @@ object AvroDerivedSparkEncoder {
     val deserializer = deserializerFor[T](inputRow, schema)
 
     // Not sure what this is.... assuming it means that serialization results are spread out over multiple columns.
+    // We always write to a single column.
     val flat = false
 
     // As of Spark 2.1.0, the `ExpressionEncoder` API is the only publicly accessible means of creating

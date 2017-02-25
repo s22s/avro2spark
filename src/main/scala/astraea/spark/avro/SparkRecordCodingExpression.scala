@@ -19,7 +19,7 @@ import scala.collection.JavaConverters._
 
 /**
  * Base class for expressions converting to/from spark InternalRow and GenericRecord.
- * @author sfitch
+ * @author sfitch (@metasim)
  * @since 2/23/17
  */
 abstract class SparkRecordCodingExpression[Input, Output]
@@ -141,7 +141,7 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
   protected def convertField(data: Any, schema: SchemaPair): Any = (data, schema.spark) match {
     case (null, _) ⇒ null
     case (av, _: NumericType) ⇒ av
-    case (sv, _: StringType) ⇒ sv.toString
+    case (sv: UTF8String, _: StringType) ⇒ sv.toString
     case (bv, _: BooleanType) ⇒ bv
     case (rv: InternalRow, st: StructType) ⇒ convertRecord(rv, SchemaPair(st, schema.avro))
     case (bv: Array[Byte], _: BinaryType) ⇒ ByteBuffer.wrap(bv)
@@ -186,6 +186,8 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
     val sparkType = sparkField.dataType
     val avroType = schema.avro.getTypes.get(schemaIndex)
 
-    (input, SchemaPair(sparkType, avroType))
+    val resolvedInput = input.get(schemaIndex, sparkType).asInstanceOf[InternalRow]
+
+    (resolvedInput, SchemaPair(sparkType, avroType))
   }
 }

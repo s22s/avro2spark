@@ -11,9 +11,9 @@ import scala.reflect.runtime.universe._
 import scala.collection.JavaConversions._
 
 /**
- * Supporting characters in Avro <-> Catalyst conversion support.
+ * Supporting cast of characters in Avro <-> Catalyst conversion.
  *
- * @author sfitch 
+ * @author sfitch (@metasim)
  * @since 2/23/17
  */
 package object avro {

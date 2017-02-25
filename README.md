@@ -1,12 +1,13 @@
 # avro2spark
 
-Experiment in constructing a Spark `StructType` from an Avro `Schema`.
+Experimental facility for encoding GeoTrellis types into Spark Datasets/Dataframes. 
 
-To run:
+To use:
 
-    sbt run
-    
-(Main class is `astraea.demo.DatabricksAvro`)    
+1. `import geotrellis.spark.io._`
+2. Create an implicit encoder for your type which has a `AvroRecordCodec[T] defined for it. e.g.:
+
+        implicit val tileEncoder = AvroDerivedSparkEncoder[Tile]
 
 
 ## Resources

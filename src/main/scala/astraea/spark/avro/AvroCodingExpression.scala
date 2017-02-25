@@ -13,7 +13,7 @@ import scala.reflect.runtime.universe._
  * Spark/Catalyst expressions associated with converting to/from native types
  * from/to Avro records.
  *
- * @author sfitch 
+ * @author sfitch (@metasim)
  * @since 2/22/17
  */
 abstract class AvroCodingExpression[T: AvroRecordCodec: TypeTag]
@@ -33,9 +33,6 @@ case class EncodeToAvro[T: AvroRecordCodec: TypeTag](child: Expression)
 
   override def dataType: DataType = ScalaReflection.dataTypeFor[GenericRecord]
 
-  // XXX: The problem here is that if a union type is involved, the intermediate
-  // array representation is removed in the value but not in the Spark schema.
-  // See https://github.com/databricks/spark-avro#supported-types-for-avro---spark-sql-conversion
   override protected def nullSafeEval(input: Any): GenericRecord =
   codec.encode(input.asInstanceOf[T])
 }

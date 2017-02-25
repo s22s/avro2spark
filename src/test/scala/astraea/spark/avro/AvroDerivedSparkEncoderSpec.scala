@@ -22,7 +22,7 @@ import scala.reflect.runtime.universe._
 
 /**
  * Test rig for [[AvroDerivedSparkEncoder]].
- * @author sfitch 
+ * @author sfitch (@metasim)
  * @since 2/13/17
  */
 class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnvironment {
@@ -52,7 +52,6 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
     it("should handle string wrapping") {
       roundTrip(StringWrapper("foobarbaz"), StringWrapper.Codec)
 
-      // Now through Spark.
       implicit val enc = encoderOf[StringWrapper]
       val example = StringWrapper(util.Random.nextString(10))
       val ds = sc.makeRDD(Seq(example)).toDS()
@@ -73,14 +72,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       implicit val enc = encoderOf[Wrapper]
 
       val ds = rddToDatasetHolder(sc.makeRDD(Seq[Wrapper](ex1, ex2)))(enc).toDS()
-      ds.printSchema()
-      ds.show(false)
 
       withClue("decoding") {
-
-        ds.collect().foreach(println)
-
-        //assert(ds.collect().collect { case d: DoubleWrapper ⇒ d}.head === ex1)
+        assert(ds.collect().collect { case d: DoubleWrapper ⇒ d}.head === ex1)
       }
     }
 
@@ -89,8 +83,6 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       implicit val enc = encoderOf[Extent]
 
       val ds = sc.makeRDD(Seq(extent)).toDS
-
-      ds.show(false)
 
       val field = ds(ds.columns.head).getItem("xmax")
 
@@ -127,10 +119,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       assert(ds.select(field).as[Double].head === stk.instant)
 
-      ds.printSchema()
 
       withClue("decoding") {
-        ds.head() === stk
+        assert(ds.head() === stk)
       }
     }
 
@@ -230,12 +221,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
     it("should handle VectorTile") {
       implicit val enc = encoderOf[VectorTile]
       val ds = sc.makeRDD(Seq(vectorTile)).toDS
-      ds.printSchema()
-      ds.show(false)
 
       assert(ds.select("VectorTile.extent.ymax").as[Double].head() === extent.ymax)
       assert(ds.select("VectorTile.bytes").as[Array[Byte]].head() === vectorTile.asInstanceOf[ProtobufTile].toBytes)
-
 
       withClue("decoding") {
         assert(ds.head() === vectorTile)
@@ -267,6 +255,7 @@ object AvroDerivedSparkEncoderSpec {
   def encoderOf[T: AvroRecordCodec: TypeTag] =
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
 
+  // Simple wrapper types and associated codecs for testing basic union ops.
   trait Wrapper
   object Wrapper {
     implicit object StringOrDoubleCodec extends AvroUnionCodec[Wrapper](StringWrapper.Codec, DoubleWrapper.Codec)
