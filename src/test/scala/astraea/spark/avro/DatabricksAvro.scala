@@ -10,10 +10,8 @@ object DatabricksAvro {
   private val counter = new AtomicInteger(0)
 
   def testData: Tile = {
-
     val i = counter.getAndIncrement()
-
-    ByteArrayTile((1 to 9).map(b ⇒ (b+i).toByte).toArray, 3, 3)
+    ByteArrayTile((1 to 9).map(b ⇒ (b + i).toByte).toArray, 3, 3)
   }
 
 

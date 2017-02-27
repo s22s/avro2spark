@@ -10,11 +10,11 @@ def geotrellis(module: String) = "org.locationtech.geotrellis" %% s"geotrellis-$
 def spark(module: String) = "org.apache.spark" %% s"spark-$module" % "2.1.0"
 
 libraryDependencies ++= Seq(
-  geotrellis("spark"),
+  geotrellis("spark") % "provided",
   geotrellis("spark-testkit") % Test,
-  spark("core"),
-  spark("sql"),
-  "com.databricks" %% "spark-avro" % "3.1.0",
+  spark("core") % "provided",
+  spark("sql") % "provided",
+  "com.databricks" %% "spark-avro" % "3.2.0" % "provided",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )
 

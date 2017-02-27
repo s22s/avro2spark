@@ -17,8 +17,8 @@ import org.apache.commons.io.IOUtils
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
-import java.time.ZonedDateTime
 
+import java.time.ZonedDateTime
 import scala.reflect.runtime.universe._
 
 /**
@@ -275,6 +275,7 @@ object AvroDerivedSparkEncoderSpec {
   case class StringWrapper(payload: String) extends Wrapper
   object StringWrapper {
     implicit object Codec extends AvroRecordCodec[StringWrapper] {
+      // codec without namespace
       override def schema: Schema = SchemaBuilder
         .record("StringWrapper")
         .fields()
@@ -291,9 +292,10 @@ object AvroDerivedSparkEncoderSpec {
 
   case class DoubleWrapper(payload: Double) extends Wrapper
   object DoubleWrapper {
+    // codec with namespace
     implicit object Codec extends AvroRecordCodec[DoubleWrapper] {
       override def schema: Schema = SchemaBuilder
-        .record("DoubleWrapper")
+        .record("DoubleWrapper").namespace("astraea.spark.avro")
         .fields()
         .name("payload").`type`.doubleType().noDefault()
         .endRecord()
