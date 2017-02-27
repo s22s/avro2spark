@@ -1,6 +1,6 @@
 package astraea.spark.avro
 
-import java.time.ZonedDateTime
+import astraea.spark.TestEnvironment
 
 import geotrellis.proj4.LatLng
 import geotrellis.raster.{BitConstantTile, ByteArrayTile, Tile, TileFeature}
@@ -17,6 +17,7 @@ import org.apache.commons.io.IOUtils
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
+import java.time.ZonedDateTime
 
 import scala.reflect.runtime.universe._
 
@@ -205,6 +206,16 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       withClue("decoding") {
         assert(ds.map(_.asciiDraw()).head() === arrayTile.asciiDraw())
+      }
+    }
+
+    it("should handle generic Tiles") {
+      implicit val enc = encoderOf[Tile]
+
+      val ds = sc.makeRDD(Seq[Tile](arrayTile, constantTile)).toDS
+
+      withClue("decoding") {
+        assert(ds.map(_.asciiDraw()).collect() === Array(arrayTile.asciiDraw(), constantTile.asciiDraw()))
       }
     }
 
