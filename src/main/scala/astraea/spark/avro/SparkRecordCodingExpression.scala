@@ -1,6 +1,7 @@
 package astraea.spark.avro
 
 import java.nio.ByteBuffer
+import java.util
 
 import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.{Schema, SchemaBuilder}
@@ -9,12 +10,14 @@ import org.apache.avro.generic.{GenericData, GenericRecord}
 import org.apache.spark.sql.catalyst.{InternalRow, ScalaReflection}
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, NonSQLExpression, UnaryExpression}
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData}
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData, GenericArrayData, MapData}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
+import scala.collection.mutable
 
 
 /**
@@ -87,6 +90,13 @@ case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
       // is reused and needs to be cloned.
       bv.bytes().clone()
     case (bv: ByteBuffer, _: BinaryType) ⇒ bv.array()
+    case (mv: java.util.Map[String @unchecked, _], mt: MapType) ⇒
+      val avroElementType = schema.avro.getValueType
+      val (keys, values) = (for {
+        (k, v) ← mv.toSeq
+      } yield (UTF8String.fromString(k), convertField(v, SchemaPair(mt.valueType, avroElementType))))
+        .unzip
+      new ArrayBasedMapData(new GenericArrayData(keys), new GenericArrayData(values))
     case (v, t) ⇒
       throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
   }
@@ -157,11 +167,28 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
               avroArray.add(convertedElement)
           })
           avroArray
+        case st: StringType ⇒
+          val avroArray = new GenericData.Array[String](av.numElements(), schema.avro)
+          av.foreach(StringType, {
+            case (_, element: UTF8String) ⇒ avroArray.add(element.toString)
+          })
+          avroArray
         case _ ⇒
           throw new NotImplementedError(
             s"Mapping '${av}' with element '${elementType}' to '${at}' needs to be implemented.")
       }
 
+    case (mv: MapData, mt: MapType) ⇒
+      val valueSchema = SchemaPair(mt.valueType, schema.avro.getValueType)
+      val avroMap = new util.HashMap[String, Any]()
+      mv.foreach(mt.keyType, mt.valueType, {
+        case (key: UTF8String, value: InternalRow) ⇒
+          val convertedElement = convertRecord(value, valueSchema)
+          avroMap.put(key.toString, convertedElement)
+        case (key: UTF8String, value: UTF8String) ⇒
+          avroMap.put(key.toString, value.toString)
+      })
+      avroMap
     case (v, t) ⇒
       throw new NotImplementedError(s"Mapping '${v}' to '${t}' needs to be implemented.")
   }
