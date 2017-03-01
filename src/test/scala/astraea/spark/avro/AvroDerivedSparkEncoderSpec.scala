@@ -11,13 +11,14 @@ import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.vector.{Extent, ProjectedExtent}
 import geotrellis.vectortile.VectorTile
 import geotrellis.vectortile.protobuf.ProtobufTile
-import org.apache.avro.generic.GenericRecord
+import org.apache.avro.generic.{GenericData, GenericRecord}
 import org.apache.avro.{Schema, SchemaBuilder}
 import org.apache.commons.io.IOUtils
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
-
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 import java.time.ZonedDateTime
 import scala.reflect.runtime.universe._
 
@@ -61,6 +62,22 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
 
       withClue("decoding") {
         assert(ds.head() === example)
+      }
+    }
+
+    it("should handle map types") {
+      roundTrip(hm, HazMap.Codec)
+      implicit val enc = encoderOf[HazMap]
+
+      val ds = sc.makeRDD(Seq(hm)).toDS
+
+      ds.printSchema()
+      ds.show(false)
+
+      assert(ds.select("HazMap.payload").head().getAs[Map[String, String]](0) === hm.payload)
+
+      withClue("decoding") {
+        assert(ds.head() === hm)
       }
     }
 
@@ -252,6 +269,7 @@ object AvroDerivedSparkEncoderSpec {
   val stk = SpaceTimeKey(sk, instant)
   val pe = ProjectedExtent(extent, LatLng)
   val tpe = TemporalProjectedExtent(pe, instant)
+  val hm = HazMap(Map("foo" -> "bar", "baz" -> "boom"))
 
   val arrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
 
@@ -307,4 +325,23 @@ object AvroDerivedSparkEncoderSpec {
         DoubleWrapper(rec.get("payload").asInstanceOf[Double])
     }
   }
+
+  case class HazMap(payload: Map[String, String]) extends Wrapper
+  object HazMap {
+    implicit object Codec extends AvroRecordCodec[HazMap] {
+      override def schema: Schema = SchemaBuilder
+        .record("HazMap")
+        .fields()
+        .name("payload").`type`().map().values().stringType().noDefault()
+        .endRecord()
+
+      override def encode(thing: HazMap, rec: GenericRecord): Unit =
+        rec.put("payload", thing.payload.asJava)
+
+
+      override def decode(rec: GenericRecord): HazMap =
+        HazMap(rec.get("payload").asInstanceOf[java.util.Map[String, String]].toMap)
+    }
+  }
+
 }
