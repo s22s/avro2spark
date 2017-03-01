@@ -14,7 +14,7 @@ libraryDependencies ++= Seq(
   geotrellis("spark-testkit") % Test,
   spark("core") % "provided",
   spark("sql") % "provided",
-  "com.databricks" %% "spark-avro" % "3.2.0" % "provided",
+  "com.databricks" %% "spark-avro" % "3.2.0",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )
 
