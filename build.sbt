@@ -14,13 +14,14 @@ licenses += ("Apache-2.0", url("https://www.apache.org/licenses/LICENSE-2.0.html
 
 def geotrellis(module: String) = "org.locationtech.geotrellis" %% s"geotrellis-$module" % "1.0.0-SNAPSHOT"
 
-def spark(module: String) = "org.apache.spark" %% s"spark-$module" % "2.0.2"
+def spark(module: String) = "org.apache.spark" %% s"spark-$module" % "2.1.0"
 
 libraryDependencies ++= Seq(
-  geotrellis("spark"),
-  spark("core"),
-  spark("sql"),
-  "com.databricks" %% "spark-avro" % "3.1.0",
+  geotrellis("spark") % "provided",
+  geotrellis("spark-testkit") % Test,
+  spark("core") % "provided",
+  spark("sql") % "provided",
+  "com.databricks" %% "spark-avro" % "3.2.0",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )
 

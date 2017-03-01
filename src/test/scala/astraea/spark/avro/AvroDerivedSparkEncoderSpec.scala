@@ -1,6 +1,6 @@
 package astraea.spark.avro
 
-import java.time.ZonedDateTime
+import astraea.spark.TestEnvironment
 
 import geotrellis.proj4.LatLng
 import geotrellis.raster.{BitConstantTile, ByteArrayTile, Tile, TileFeature}
@@ -19,6 +19,7 @@ import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Matchers}
 import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
+import java.time.ZonedDateTime
 import scala.reflect.runtime.universe._
 
 /**
@@ -225,6 +226,16 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with TestEnviron
       }
     }
 
+    it("should handle generic Tiles") {
+      implicit val enc = encoderOf[Tile]
+
+      val ds = sc.makeRDD(Seq[Tile](arrayTile, constantTile)).toDS
+
+      withClue("decoding") {
+        assert(ds.map(_.asciiDraw()).collect() === Array(arrayTile.asciiDraw(), constantTile.asciiDraw()))
+      }
+    }
+
     it("should handle TileFeature") {
       implicit val enc = encoderOf[TileFeature[BitConstantTile, StringWrapper]]
 
@@ -282,6 +293,7 @@ object AvroDerivedSparkEncoderSpec {
   case class StringWrapper(payload: String) extends Wrapper
   object StringWrapper {
     implicit object Codec extends AvroRecordCodec[StringWrapper] {
+      // codec without namespace
       override def schema: Schema = SchemaBuilder
         .record("StringWrapper")
         .fields()
@@ -298,9 +310,10 @@ object AvroDerivedSparkEncoderSpec {
 
   case class DoubleWrapper(payload: Double) extends Wrapper
   object DoubleWrapper {
+    // codec with namespace
     implicit object Codec extends AvroRecordCodec[DoubleWrapper] {
       override def schema: Schema = SchemaBuilder
-        .record("DoubleWrapper")
+        .record("DoubleWrapper").namespace("astraea.spark.avro")
         .fields()
         .name("payload").`type`.doubleType().noDefault()
         .endRecord()
