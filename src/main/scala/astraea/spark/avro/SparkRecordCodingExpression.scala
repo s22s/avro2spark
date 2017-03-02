@@ -2,6 +2,7 @@ package astraea.spark.avro
 
 import java.nio.ByteBuffer
 import java.util
+import java.util.UUID
 
 import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.{Schema, SchemaBuilder}
@@ -18,6 +19,7 @@ import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
 import scala.collection.mutable
+import scala.util.Try
 
 
 /**
@@ -25,7 +27,7 @@ import scala.collection.mutable
  * @author sfitch (@metasim)
  * @since 2/23/17
  */
-abstract class SparkRecordCodingExpression[Input, Output]
+abstract class SparkRecordCodingExpression[Input >: Null, Output]
   extends UnaryExpression with NonSQLExpression with CodegenFallback with Serializable {
 
   override protected final def nullSafeEval(input: Any): Output = {
@@ -36,14 +38,34 @@ abstract class SparkRecordCodingExpression[Input, Output]
   @tailrec
   protected final def convertRecord(input: Input, schema: SchemaPair): Output = {
     if(schema.isUnion) {
-      val (newInput, newSchema) = resolveUnion(input, schema)
+      // If MatchError, then error.
+      val Some(idx) = unionIndex(input, schema)
+      val (newInput, newSchema) = resolveUnion[Input](input, idx, schema)
       convertRecord(newInput, newSchema)
     }
     else {
       val fieldData = schema.fields
-        .map { case (selector, fieldSchema) ⇒
-          val fieldValue = extractValue(input, selector, fieldSchema)
-          (selector, convertField(fieldValue, fieldSchema))
+        .map {
+          case (selector, fieldSchema) ⇒ if (fieldSchema.isUnion) {
+            fieldSchema.spark match {
+              case _: StructType ⇒
+                val fieldValue = extractValue(input, selector, fieldSchema)
+                val Some(idx) = unionIndex(fieldValue, fieldSchema)
+                //val newSchema = fieldSchema.selectUnion(idx)
+                val (newInput, newSchema) = resolveUnion[Any](fieldValue, idx, fieldSchema)
+                (selector, convertField(newInput, newSchema))
+              case _ ⇒
+                // This is intended to handle the case where the union is over a type or the null schema
+                val fieldValue = extractValue(input, selector, fieldSchema)
+                val Some(idx) = unionIndex(fieldValue, fieldSchema)
+                val newSchema = fieldSchema.copy(avro = fieldSchema.avro.getTypes.get(idx))
+                (selector, convertField(fieldValue, newSchema))
+            }
+          }
+          else {
+            val fieldValue = extractValue(input, selector, fieldSchema)
+            (selector, convertField(fieldValue, fieldSchema))
+          }
         }
 
       constructOutput(fieldData, schema)
@@ -58,7 +80,9 @@ abstract class SparkRecordCodingExpression[Input, Output]
 
   protected def convertField(data: Any, schema: SchemaPair): Any
 
-  protected def resolveUnion(input: Input, schema: SchemaPair): (Input, SchemaPair)
+  protected def unionIndex(data: Any, schema: SchemaPair): Option[Int]
+
+  protected def resolveUnion[R >: Null](data: Any, unionIndex: Int, schema: SchemaPair): (R, SchemaPair)
 
   protected def constructOutput(fieldData: Seq[(FieldSelector, Any)], schema: SchemaPair): Output
 }
@@ -66,6 +90,8 @@ abstract class SparkRecordCodingExpression[Input, Output]
 /** Expression converting Avro record format into the internal Spark format. */
 case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: StructType)
   extends SparkRecordCodingExpression[GenericRecord, InternalRow] {
+
+  private val tmpNamespace = UUID.randomUUID().toString
 
   def dataType: DataType = sparkSchema
 
@@ -76,10 +102,14 @@ case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
 
   protected def convertField(data: Any, schema: SchemaPair): Any = (data, schema.spark) match {
     case (null, _) ⇒ null
-    case (av, _: NumericType) ⇒ av
     case (sv, _: StringType) ⇒ UTF8String.fromString(String.valueOf(sv))
-    case (bv, _: BooleanType) ⇒ bv
     case (rv: GenericRecord, st: StructType) ⇒ convertRecord(rv, SchemaPair(st, schema.avro))
+    case (nv: java.lang.Number, nt: NumericType) ⇒ nt match {
+      case _: ShortType ⇒ nv.shortValue()
+      case _: IntegerType ⇒ nv.intValue()
+      case _ ⇒ nv
+    }
+    case (bv, _: BooleanType) ⇒ bv
     case (av: ByteBuffer, _: ArrayType) ⇒ av.array()
     case (av: java.lang.Iterable[_], at: ArrayType) ⇒
       val avroElementType = schema.avro.getElementType
@@ -106,18 +136,17 @@ case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
 
   override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
 
-  protected def resolveUnion(input: GenericRecord, schema: SchemaPair): (GenericRecord, SchemaPair) = {
+  protected def unionIndex(data: Any, schema: SchemaPair): Option[Int] =
+    Try(GenericData.get().resolveUnion(schema.avro, data)).toOption
 
+  protected def resolveUnion[R >: Null](data: Any, unionIndex: Int, schema: SchemaPair): (R, SchemaPair) = {
     require(schema.isUnion)
-    val schemaIndex = schema.avro.getIndexNamed(input.getSchema.getFullName)
-    require(schemaIndex != null,
-      s"Couldn't find union type with name '${input.getSchema.getName}' in ${schema.avro}")
 
-    val selectedAvro = schema.avro.getTypes.get(schemaIndex)
-    val sparkField = schema.sparkStruct.fields(schemaIndex)
+    val selectedAvro = schema.avro.getTypes.get(unionIndex)
+    val sparkField = schema.sparkStruct.fields(unionIndex)
 
     val builder = SchemaBuilder
-      .record(selectedAvro.getName + "ResolvedUnion").namespace(selectedAvro.getNamespace)
+      .record(selectedAvro.getName + "ResolvedUnion").namespace(tmpNamespace)
       .fields()
 
     val newSchema = schema.sparkStruct.fields.foldRight(builder) {
@@ -131,9 +160,9 @@ case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
 
     val rec = new GenericData.Record(newSchema)
 
-    rec.put(sparkField.name, input)
+    rec.put(sparkField.name, data)
 
-    (rec, schema.copy(avro = newSchema))
+    (rec.asInstanceOf[R], schema.copy(avro = newSchema))
   }
 }
 
@@ -152,30 +181,25 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
     case (null, _) ⇒ null
     case (av, _: NumericType) ⇒ av
     case (sv: UTF8String, _: StringType) ⇒ sv.toString
-    case (bv, _: BooleanType) ⇒ bv
+    case (bv, _: BooleanType) ⇒
+      bv
     case (rv: InternalRow, st: StructType) ⇒ convertRecord(rv, SchemaPair(st, schema.avro))
     case (bv: Array[Byte], _: BinaryType) ⇒ ByteBuffer.wrap(bv)
     case (av: ArrayData, at: ArrayType) ⇒
-      val elementType = at.elementType
-      elementType match {
+      val elementType = schema.elementType
+      elementType.spark match {
         case st: StructType ⇒
           val avroArray = new GenericData.Array[GenericRecord](av.numElements(), schema.avro)
-          val avroElementType = schema.avro.getElementType
-          av.foreach(elementType, {
-            case (_, element: InternalRow) ⇒
-              val convertedElement = convertRecord(element, SchemaPair(st, avroElementType))
-              avroArray.add(convertedElement)
-          })
-          avroArray
-        case st: StringType ⇒
-          val avroArray = new GenericData.Array[String](av.numElements(), schema.avro)
-          av.foreach(StringType, {
-            case (_, element: UTF8String) ⇒ avroArray.add(element.toString)
+          av.foreach(elementType.spark, {
+            case (_, element: InternalRow) ⇒ avroArray.add(convertRecord(element, elementType))
           })
           avroArray
         case _ ⇒
-          throw new NotImplementedError(
-            s"Mapping '${av}' with element '${elementType}' to '${at}' needs to be implemented.")
+          val avroArray = new GenericData.Array[Any](av.numElements(), schema.avro)
+          av.foreach(elementType.spark, {
+            case (_, element) ⇒ avroArray.add(convertField(element, schema.elementType))
+          })
+          avroArray
       }
 
     case (mv: MapData, mt: MapType) ⇒
@@ -203,17 +227,26 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
 
   override protected def otherCopyArgs: Seq[AnyRef] = implicitly[AvroRecordCodec[T]] :: Nil
 
-  protected def resolveUnion(input: InternalRow, schema: SchemaPair) = {
+  protected def unionIndex(data: Any, schema: SchemaPair): Option[Int] = data match {
+    case input: InternalRow ⇒
+      val numFields = schema.sparkStruct.fields.length
+      (0 until numFields).find(!input.isNullAt(_))
+    case _ ⇒
+      Try(GenericData.get().resolveUnion(schema.avro, data)).toOption
+  }
+
+  protected def resolveUnion[R >: Null](data: Any, unionIndex: Int, schema: SchemaPair) = {
     require(schema.isUnion)
 
-    val Some((sparkField, schemaIndex)) = schema.sparkStruct.fields
-      .zipWithIndex
-      .find(p ⇒ !input.isNullAt(p._2))
-
+    val sparkField = schema.sparkStruct.fields(unionIndex)
     val sparkType = sparkField.dataType
-    val avroType = schema.avro.getTypes.get(schemaIndex)
+    val avroType = schema.avro.getTypes.get(unionIndex)
 
-    val resolvedInput = input.get(schemaIndex, sparkType).asInstanceOf[InternalRow]
+    val resolvedInput = data match {
+      case input: InternalRow ⇒ input.get(unionIndex, sparkType).asInstanceOf[R]
+      case _ ⇒
+        ???
+    }
 
     (resolvedInput, SchemaPair(sparkType, avroType))
   }

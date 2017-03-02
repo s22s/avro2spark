@@ -217,19 +217,6 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with Inspectors 
       }
     }
 
-    it("should handle all Tile types") {
-      implicit val enc = encoderOf[Tile]
-
-      val ds = sc.makeRDD(allTileTypes).toDS
-
-      withClue("decoding") {
-        val decoded = ds.collect()
-        forAll(decoded.zip(allTileTypes)) {
-          case (result, expected) ⇒ assert(result.asciiDraw() === expected.asciiDraw())
-        }
-      }
-    }
-
     it("should handle generic Tiles") {
       implicit val enc = encoderOf[Tile]
 
@@ -247,6 +234,19 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with Inspectors 
 
       withClue("decoding") {
         assert(ds.map(_.data.payload).head() === tileFeature.data.payload)
+      }
+    }
+
+    it("should handle all Tile types") {
+      implicit val enc = encoderOf[Tile]
+
+      val ds = sc.makeRDD(allTileTypes).toDS
+
+      withClue("decoding") {
+        val decoded = ds.collect()
+        forAll(decoded.zip(allTileTypes)) {
+          case (result, expected) ⇒ assert(result.asciiDraw() === expected.asciiDraw())
+        }
       }
     }
 
