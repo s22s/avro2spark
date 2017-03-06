@@ -4,7 +4,7 @@ name := "avro2spark"
 
 organization := "astraea"
 
-version := "0.1.2-SNAPSHOT"
+version := "0.1.2"
 
 resolvers += "LocationTech GeoTrellis Releases" at "https://repo.locationtech.org/content/repositories/geotrellis-releases"
 
@@ -26,6 +26,8 @@ libraryDependencies ++= Seq(
 )
 
 bintrayOrganization := Some("s22s")
+
+bintrayReleaseOnPublish in ThisBuild := false
 
 //http://dl.bintray.com/s22s/maven-releases
 publishArtifact in (Compile, packageDoc) := false

@@ -18,7 +18,6 @@ import org.apache.spark.unsafe.types.UTF8String
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
-import scala.collection.mutable
 import scala.util.Try
 
 
@@ -245,7 +244,7 @@ case class SparkToAvro[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
     val resolvedInput = data match {
       case input: InternalRow ⇒ input.get(unionIndex, sparkType).asInstanceOf[R]
       case _ ⇒
-        ???
+        throw new IllegalArgumentException("Didn't expect to have to resolve union against " + data.getClass.getName)
     }
 
     (resolvedInput, SchemaPair(sparkType, avroType))
