@@ -1,15 +1,13 @@
 package astraea.spark
 
-import com.databricks.spark.avro.SchemaConverters
 import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.Schema
 import org.apache.avro.Schema.Type
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.types.{StructType, _}
 
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
-import scala.collection.JavaConversions._
-import scala.util.Try
+import scala.collection.JavaConverters._
 
 /**
  * Supporting cast of characters in Avro <-> Catalyst conversion.
@@ -53,7 +51,7 @@ package object avro {
 
     def fields: Seq[(FieldSelector, SchemaPair)] = spark match {
       case st: StructType ⇒
-        st.fields.zip(avro.getFields).zipWithIndex.map {
+        st.fields.zip(avro.getFields.asScala).zipWithIndex.map {
           case ((sparkField, avroField), index) ⇒
             (FieldSelector(index, sparkField.name), SchemaPair(sparkField.dataType, avroField.schema()))
         }
@@ -74,8 +72,7 @@ package object avro {
     val codec = implicitly[AvroRecordCodec[T]]
 
     // Convert Avro schema to Spark schema via Databricks library
-    val sqlType = SchemaConverters.toSqlType(codec.schema)
-
+    val sqlType = SchemaType.fromAvro(codec.schema)
     sqlType.dataType match {
       case st: StructType ⇒ st
       case dt ⇒ throw new IllegalArgumentException(s"$dt not a struct. Use built-in Spark `Encoder`s instead.")

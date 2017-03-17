@@ -10,7 +10,7 @@ import org.scalatest._
 import scala.util.Properties
 
 trait TestEnvironment extends GeoTrellisTestEnvironment { self: Suite with BeforeAndAfterAll ⇒
-  lazy val _ss: SparkSession = {
+  val _ss: SparkSession = {
     System.setProperty("spark.driver.port", "0")
     System.setProperty("spark.hostPort", "0")
     System.setProperty("spark.ui.enabled", "false")
