@@ -3,6 +3,7 @@ package astraea.spark.avro
 import org.apache.avro.Schema
 import org.apache.avro.Schema.Type._
 import org.apache.spark.sql.types._
+
 import scala.collection.JavaConverters._
 
 case class SchemaType(dataType: DataType, nullable: Boolean)
@@ -56,23 +57,19 @@ object SchemaType {
             SchemaType(LongType, nullable = false)
           case Seq(t1, t2) if Set(t1, t2) == Set(FLOAT, DOUBLE) =>
             SchemaType(DoubleType, nullable = false)
-          case unionTypes if unionTypes.forall(_ == RECORD) =>
-            // If union types are all records, use their record names for struct field names
-            val fields = avroSchema.getTypes.asScala.map { s =>
-              val schemaType = fromAvro(s)
-              // All fields are nullable because only one of them is set at a time
-              StructField(s.getName, schemaType.dataType, nullable = true)
-            }
-
-            SchemaType(StructType(fields), nullable = false)
           case _ =>
-            // Convert complex unions to struct types where field names are member0, member1, etc.
+            // Convert complex unions to struct types where field names are either names of primitives
+            //  or names of the avro record. Avro union spec does not allow ambiguity that would break this.
             // This is consistent with the behavior when converting between Avro and Parquet.
-            val fields = avroSchema.getTypes.asScala.zipWithIndex.map {
-              case (s, i) =>
-                val schemaType = fromAvro(s)
-                // All fields are nullable because only one of them is set at a time
-                StructField(s"member$i", schemaType.dataType, nullable = true)
+            val fields = avroSchema.getTypes.asScala.map { schema: Schema =>
+              // All fields are nullable because only one of them is set at a time
+              val ft = fromAvro(schema).dataType
+              schema.getType match {
+                case RECORD =>
+                  StructField(schema.getName, ft, nullable = true)
+                case avroType =>
+                  StructField(avroType.getName, ft, nullable = true)
+              }
             }
 
             SchemaType(StructType(fields), nullable = false)
@@ -81,5 +78,4 @@ object SchemaType {
       case other => throw new IllegalArgumentException(s"Unsupported type ${other.toString}")
     }
   }
-
 }
