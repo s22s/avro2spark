@@ -4,7 +4,7 @@ name := "avro2spark"
 
 organization := "astraea"
 
-version := "0.1.4"
+version := "0.1.5-SNAPSHOT"
 
 resolvers += "LocationTech GeoTrellis Releases" at "https://repo.locationtech.org/content/repositories/geotrellis-releases"
 
