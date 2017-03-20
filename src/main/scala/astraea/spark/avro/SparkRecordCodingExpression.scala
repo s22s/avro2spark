@@ -150,11 +150,11 @@ case class AvroToSpark[T: AvroRecordCodec](child: Expression, sparkSchema: Struc
 
     val newSchema = schema.sparkStruct.fields.foldRight(builder) {
       // For everything except the selected schema, the actual type doesn't really matter.
-      case (field, builder) ⇒
+      case (field, bldr) ⇒
         if (field == sparkField)
-          builder.name(field.name).`type`(selectedAvro).noDefault()
+          bldr.name(field.name).`type`(selectedAvro).noDefault()
         else
-          builder.name(field.name).`type`(selectedAvro).withDefault(null)
+          bldr.name(field.name).`type`(selectedAvro).withDefault(null)
     }.endRecord()
 
     val rec = new GenericData.Record(newSchema)

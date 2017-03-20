@@ -24,12 +24,6 @@ package object avro {
 
     /** Is an Avro union represented in this Schema. */
     val isUnion = avro.getType == Type.UNION
-//
-//    /** Attempt to find where in an Avro union the associated Spark type lives. */
-//    def avroUnionIndexOfSparkType = Try(
-//      avro.getTypes.indexWhere(s ⇒ avro2Spark.get(s.getType).contains(spark)))
-//      .toOption
-//      .filter(_ > -1)
 
     def sparkStruct = spark match {
       case st: StructType ⇒ st
@@ -67,46 +61,6 @@ package object avro {
     ClassTag[T](cls)
   }
 
-  /** Via Databricks' `spark-avro`, convert the Avro schema into a Spark/Catalyst schema. */
-  private[avro] def schemaFor[T: AvroRecordCodec]: StructType = {
-    val codec = implicitly[AvroRecordCodec[T]]
-
-    // Convert Avro schema to Spark schema via Databricks library
-    val sqlType = SchemaType.fromAvro(codec.schema)
-    sqlType.dataType match {
-      case st: StructType ⇒ st
-      case dt ⇒ throw new IllegalArgumentException(s"$dt not a struct. Use built-in Spark `Encoder`s instead.")
-    }
-  }
-
-  private[avro] val avro2Spark = Map(
-    Schema.Type.BOOLEAN -> BooleanType,
-    Schema.Type.INT -> IntegerType,
-    Schema.Type.LONG -> LongType,
-    Schema.Type.FLOAT -> FloatType,
-    Schema.Type.DOUBLE -> DoubleType,
-    Schema.Type.BYTES -> BinaryType,
-    Schema.Type.STRING -> StringType,
-    Schema.Type.RECORD -> StructType,
-    Schema.Type.ENUM -> StringType,
-    Schema.Type.ARRAY -> ArrayType,
-    Schema.Type.MAP -> MapType,
-    Schema.Type.FIXED -> BinaryType,
-    Schema.Type.UNION -> NullType // <-- Using NullType as a sentinel.
-  )
-
-  private[avro] val spark2Avro = Map(
-    BooleanType -> Set(Schema.Type.BOOLEAN, Schema.Type.UNION),
-    IntegerType -> Set(Schema.Type.INT, Schema.Type.UNION),
-    LongType -> Set(Schema.Type.LONG, Schema.Type.UNION),
-    FloatType -> Set(Schema.Type.FLOAT, Schema.Type.UNION),
-    DoubleType -> Set(Schema.Type.DOUBLE, Schema.Type.UNION),
-    BinaryType -> Set(Schema.Type.BYTES, Schema.Type.FIXED, Schema.Type.UNION),
-    StringType -> Set(Schema.Type.STRING, Schema.Type.ENUM, Schema.Type.UNION),
-    StructType -> Set(Schema.Type.RECORD, Schema.Type.UNION),
-    ArrayType -> Set(Schema.Type.ARRAY, Schema.Type.UNION),
-    MapType -> Set(Schema.Type.MAP, Schema.Type.UNION)
-  )
 
   /** Generate a field name for the serialized object. Shows up as the default column name. */
   private[avro] def fieldNameFor[T: TypeTag]: String = classTagFor[T].runtimeClass.getSimpleName

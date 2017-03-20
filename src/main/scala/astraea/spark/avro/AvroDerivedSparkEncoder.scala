@@ -24,7 +24,7 @@ object AvroDerivedSparkEncoder {
     val cls = classTagFor[T]
 
     // Get the `spark-avro` generated schema
-    val schema = schemaFor[T]
+    val schema = SchemaConverter.schemaFor[T]
 
     // The results from serialization will be all in one column. This introduces a parent schema
     // to communicate this grouping mechanism to Catalyst.
