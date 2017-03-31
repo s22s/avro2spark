@@ -1,6 +1,5 @@
 package astraea.spark
 
-import geotrellis.spark.io.avro.AvroRecordCodec
 import org.apache.avro.Schema
 import org.apache.avro.Schema.Type
 import org.apache.spark.sql.types.{StructType, _}

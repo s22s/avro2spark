@@ -6,9 +6,13 @@ organization := "astraea"
 
 version := "0.1.5-SNAPSHOT"
 
-resolvers += "LocationTech GeoTrellis Releases" at "https://repo.locationtech.org/content/repositories/geotrellis-releases"
+resolvers ++= Seq(
+  "locationtech-releases" at "https://repo.locationtech.org/content/groups/releases",
+  "boundlessgeo" at "https://repo.boundlessgeo.com/main",
+  "osgeo" at "http://download.osgeo.org/webdav/geotools",
+  "conjars.org" at "http://conjars.org/repo"
+)
 
-resolvers += "LocationTech GeoTrellis Snapshots" at "https://repo.locationtech.org/content/repositories/geotrellis-snapshots"
 
 licenses += ("Apache-2.0", url("https://www.apache.org/licenses/LICENSE-2.0.html"))
 
@@ -21,6 +25,7 @@ libraryDependencies ++= Seq(
   geotrellis("spark-testkit") % Test,
   spark("core") % "provided",
   spark("sql") % "provided",
+  "org.locationtech.geomesa" %% "geomesa-spark-sql" % "1.3.1",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )
 
