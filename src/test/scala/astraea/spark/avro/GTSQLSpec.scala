@@ -24,7 +24,7 @@ import org.apache.spark.sql.GTSQL
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 
 /**
- *
+ * Test rig for Spark UDTs and friends for GT.
  * @author sfitch 
  * @since 3/30/17
  */
@@ -54,7 +54,7 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       query.show(false)
     }
     it("should expand rows") {
-      val query = sql.sql("select st_explodeTile(st_makeConstantTile(1, 10, 10, 'int8raw'))")
+      val query = sql.sql("select st_explodeTile(st_makeConstantTile(1, 10, 10, 'int8raw'), st_makeConstantTile(2, 10, 10, 'int8raw'))")
       query.show(false)
     }
   }
