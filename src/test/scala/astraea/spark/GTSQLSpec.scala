@@ -16,11 +16,10 @@
  * the License.
  */
 
-package astraea.spark.avro
+package astraea.spark
 
-import astraea.spark.TestEnvironment
 import geotrellis.raster.{ByteCellType, Tile}
-import org.apache.spark.sql.GTSQL
+import org.apache.spark.sql.{DataFrame, Encoder, GTSQL}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 
 /**
@@ -28,34 +27,47 @@ import org.scalatest.{FunSpec, Inspectors, Matchers}
  * @author sfitch 
  * @since 3/30/17
  */
-class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironment {
+class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironment with TestData {
 
   GTSQL.init(sql)
+
+  implicit class DFExtras(df: DataFrame) {
+    def firstTile: Tile = df.collect().head.getAs[Tile](0)
+  }
+
+  import _spark.implicits._
 
   describe("GeoTrellis UDTs") {
     it("should create constant tiles") {
       val query = sql.sql("select st_makeConstantTile(1, 10, 10, 'int8raw')")
-      query.show(false)
-      val tile = query.collect().head.getAs[Tile](0)
+      val tile = query.firstTile
       assert(tile.cellType === ByteCellType)
-
-      println(tile.asciiDrawDouble())
     }
+
     it("should evaluate UDF on tile") {
       val query = sql.sql("select st_focalSum(st_makeConstantTile(1, 10, 10, 'int8raw'), 4)")
-      query.show(false)
-      val tile = query.collect().head.getAs[Tile](0)
+      val tile = query.firstTile
       assert(tile.cellType === ByteCellType)
 
       println(tile.asciiDrawDouble())
     }
     it("should generate multiple rows") {
       val query = sql.sql("select st_makeTiles(3)")
-      query.show(false)
+      val tiles = query.collect().head.getAs[Seq[Tile]](0)
+      assert(tiles.distinct.size == 1)
+
     }
     it("should expand rows") {
       val query = sql.sql("select st_explodeTile(st_makeConstantTile(1, 10, 10, 'int8raw'), st_makeConstantTile(2, 10, 10, 'int8raw'))")
-      query.show(false)
+      assert(query.as[(Double, Double)].collect().forall(_ == (1.0, 2.0)))
+    }
+    it("should encode RDD[Tile]") {
+      val rdd = sc.makeRDD(Seq(byteArrayTile: Tile))
+
+      import org.apache.spark.sql.GTSQL.Implicits._
+
+      val ds = rdd.toDS
+      assert(ds.toDF.as[Tile].collect().head === byteArrayTile)
     }
   }
 }

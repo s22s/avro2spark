@@ -10,7 +10,7 @@ import org.scalatest._
 import scala.util.Properties
 
 trait TestEnvironment extends GeoTrellisTestEnvironment { self: Suite with BeforeAndAfterAll ⇒
-  val _ss: SparkSession = {
+  val _spark: SparkSession = {
     System.setProperty("spark.driver.port", "0")
     System.setProperty("spark.hostPort", "0")
     System.setProperty("spark.ui.enabled", "false")
@@ -38,7 +38,7 @@ trait TestEnvironment extends GeoTrellisTestEnvironment { self: Suite with Befor
     session
   }
 
-  override implicit def sc: SparkContext = _ss.sparkContext
+  override implicit def sc: SparkContext = _spark.sparkContext
 
-  lazy val sql: SQLContext = _ss.sqlContext
+  lazy val sql: SQLContext = _spark.sqlContext
 }

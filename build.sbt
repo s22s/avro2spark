@@ -16,7 +16,7 @@ resolvers ++= Seq(
 
 licenses += ("Apache-2.0", url("https://www.apache.org/licenses/LICENSE-2.0.html"))
 
-def geotrellis(module: String) = "org.locationtech.geotrellis" %% s"geotrellis-$module" % "1.0.0-SNAPSHOT"
+def geotrellis(module: String) = "org.locationtech.geotrellis" %% s"geotrellis-$module" % "1.1.0-RC1"
 
 def spark(module: String) = "org.apache.spark" %% s"spark-$module" % "2.1.0"
 

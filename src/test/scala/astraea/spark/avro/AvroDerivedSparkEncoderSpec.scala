@@ -1,29 +1,22 @@
 package astraea.spark.avro
 
-import astraea.spark.TestEnvironment
-import geotrellis.proj4.LatLng
+import astraea.spark.{TestData, TestEnvironment}
 import geotrellis.raster._
 import geotrellis.spark.io.avro.codecs.Implicits._
-import geotrellis.spark.io.avro.codecs.{KeyValueRecordCodec, TupleCodec}
+import geotrellis.spark.io.avro.codecs.KeyValueRecordCodec
 import geotrellis.spark.io.avro.{AvroRecordCodec, AvroUnionCodec}
 import geotrellis.spark.{SpaceTimeKey, SpatialKey, TemporalProjectedExtent}
 import geotrellis.vector.{Extent, ProjectedExtent}
 import geotrellis.vectortile.VectorTile
 import geotrellis.vectortile.protobuf.ProtobufTile
-import org.apache.avro.generic.{GenericData, GenericRecord}
+import org.apache.avro.generic.GenericRecord
 import org.apache.avro.{Schema, SchemaBuilder}
-import org.apache.commons.io.IOUtils
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 
-import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
-import java.time.ZonedDateTime
-
-import geotrellis.raster
-
-import scala.reflect.ClassTag
+import scala.collection.JavaConverters._
 import scala.reflect.runtime.universe._
 
 /**
@@ -265,42 +258,11 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with Inspectors 
 }
 
 /** Test support bits */
-object AvroDerivedSparkEncoderSpec {
+object AvroDerivedSparkEncoderSpec extends TestData {
+
   val oneThird = DoubleWrapper(1.0/3.0)
-  val instant = ZonedDateTime.now()
-  val extent = Extent(1, 2, 3, 4)
-  val sk = SpatialKey(37, 41)
-  val stk = SpaceTimeKey(sk, instant)
-  val pe = ProjectedExtent(extent, LatLng)
-  val tpe = TemporalProjectedExtent(pe, instant)
   val hm = HazMap(Map("foo" -> "bar", "baz" -> "boom"))
-
-  val byteArrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
-
-  val constantTile = BitConstantTile(1, 2, 2)
   val tileFeature = TileFeature(constantTile, StringWrapper("beepbob"))
-
-  val allTileTypes: Seq[Tile] = {
-    val rows = 3
-    val cols = 3
-    val range = 1 to rows * cols
-    def rangeArray[T: ClassTag](conv: (Int ⇒ T)): Array[T] = range.map(conv).toArray
-    Seq(
-      BitArrayTile(Array[Byte](0,1,2,3,4,5,6,7,8), 3*8, 3),
-      ByteArrayTile(rangeArray(_.toByte), rows, cols),
-      DoubleArrayTile(rangeArray(_.toDouble), rows, cols),
-      FloatArrayTile(rangeArray(_.toFloat), rows, cols),
-      IntArrayTile(rangeArray(identity), rows, cols),
-      ShortArrayTile(rangeArray(_.toShort), rows, cols),
-      UByteArrayTile(rangeArray(_.toByte), rows, cols),
-      UShortArrayTile(rangeArray(_.toShort), rows, cols)
-    )
-  }
-
-  lazy val vectorTile = ProtobufTile.fromBytes(
-    IOUtils.toByteArray(getClass.getResourceAsStream("/MultiLayer.mvt")),
-    extent
-  )
 
   def encoderOf[T: AvroRecordCodec: TypeTag] =
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
