@@ -25,7 +25,7 @@ libraryDependencies ++= Seq(
   geotrellis("spark-testkit") % Test,
   spark("core") % "provided",
   spark("sql") % "provided",
-  "org.locationtech.geomesa" %% "geomesa-spark-sql" % "1.3.1",
+  //"org.locationtech.geomesa" %% "geomesa-spark-sql" % "1.3.1",
   "org.scalatest" %% "scalatest" % "3.0.1" % Test
 )
 
