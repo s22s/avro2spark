@@ -44,7 +44,10 @@ trait TestData {
 
   val byteArrayTile = ByteArrayTile((1 to 9).map(_ .toByte).toArray, 3, 3)
 
-  val constantTile = BitConstantTile(1, 2, 2)
+  val bitConstantTile = BitConstantTile(1, 2, 2)
+  val byteConstantTile = ByteConstantTile(7, 3, 3)
+
+  val multibandTile = MultibandTile(byteArrayTile, byteConstantTile)
 
   val allTileTypes: Seq[Tile] = {
     val rows = 3

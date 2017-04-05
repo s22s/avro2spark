@@ -18,13 +18,15 @@
 
 package astraea.spark
 
-import geotrellis.raster.{ByteCellType, Tile}
-import org.apache.spark.sql.{DataFrame, Encoder, GTSQL}
+import geotrellis.raster.{ByteCellType, MultibandTile, Tile, TileFeature}
+import org.apache.spark.sql.GTSQL.Implicits._
+import org.apache.spark.sql.execution.debug._
+import org.apache.spark.sql.{DataFrame, GTSQL}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 
 /**
  * Test rig for Spark UDTs and friends for GT.
- * @author sfitch 
+ * @author sfitch
  * @since 3/30/17
  */
 class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironment with TestData {
@@ -48,26 +50,45 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       val query = sql.sql("select st_focalSum(st_makeConstantTile(1, 10, 10, 'int8raw'), 4)")
       val tile = query.firstTile
       assert(tile.cellType === ByteCellType)
-
-      println(tile.asciiDrawDouble())
+      // println(tile.asciiDrawDouble())
     }
+
     it("should generate multiple rows") {
       val query = sql.sql("select st_makeTiles(3)")
       val tiles = query.collect().head.getAs[Seq[Tile]](0)
       assert(tiles.distinct.size == 1)
 
     }
+
     it("should expand rows") {
       val query = sql.sql("select st_explodeTile(st_makeConstantTile(1, 10, 10, 'int8raw'), st_makeConstantTile(2, 10, 10, 'int8raw'))")
       assert(query.as[(Double, Double)].collect().forall(_ == (1.0, 2.0)))
     }
-    it("should encode RDD[Tile]") {
+
+    it("should code RDD[(Int, Tile)]") {
+      val rdd = sc.makeRDD(Seq((1, byteArrayTile: Tile)))
+      val ds = rddToDatasetHolder(rdd)(newProductEncoder[(Int, Tile)]).toDS()
+      ds.debugCodegen()
+      ds.show()
+      assert(ds.toDF.as[(Int, Tile)].collect().head === (1, byteArrayTile))
+    }
+
+    it("should code RDD[Tile]") {
       val rdd = sc.makeRDD(Seq(byteArrayTile: Tile))
-
-      import org.apache.spark.sql.GTSQL.Implicits._
-
       val ds = rdd.toDS
       assert(ds.toDF.as[Tile].collect().head === byteArrayTile)
+    }
+
+    it("should code RDD[MultibandTile]") {
+      val rdd = sc.makeRDD(Seq(multibandTile: MultibandTile))
+      val ds = rdd.toDS()
+      assert(ds.toDF.as[MultibandTile].collect().head === multibandTile)
+    }
+
+    it("should code RDD[TileFeature]") {
+      val rdd = sc.makeRDD(Seq(TileFeature(byteArrayTile: Tile, "meta")))
+      val ds = rdd.toDS()
+      ds.show()
     }
   }
 }

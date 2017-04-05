@@ -192,9 +192,9 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with Inspectors 
       // We have to force the use of our encoder in this case because `ConstantTile`s
       // are `Product` types, which already have `Encoder`s.
       val enc = encoderOf[BitConstantTile]
-      val ds = rddToDatasetHolder(sc.makeRDD(Seq(constantTile)))(enc).toDS
+      val ds = rddToDatasetHolder(sc.makeRDD(Seq(bitConstantTile)))(enc).toDS
       withClue("decoding") {
-        assert(ds.filter(_.rows == 2).head() === constantTile)
+        assert(ds.filter(_.rows == 2).head() === bitConstantTile)
       }
     }
 
@@ -213,10 +213,10 @@ class AvroDerivedSparkEncoderSpec extends FunSpec with Matchers with Inspectors 
     it("should handle generic Tiles") {
       implicit val enc = encoderOf[Tile]
 
-      val ds = sc.makeRDD(Seq[Tile](byteArrayTile, constantTile)).toDS
+      val ds = sc.makeRDD(Seq[Tile](byteArrayTile, bitConstantTile)).toDS
 
       withClue("decoding") {
-        assert(ds.map(_.asciiDraw()).collect() === Array(byteArrayTile.asciiDraw(), constantTile.asciiDraw()))
+        assert(ds.map(_.asciiDraw()).collect() === Array(byteArrayTile.asciiDraw(), bitConstantTile.asciiDraw()))
       }
     }
 
@@ -262,7 +262,7 @@ object AvroDerivedSparkEncoderSpec extends TestData {
 
   val oneThird = DoubleWrapper(1.0/3.0)
   val hm = HazMap(Map("foo" -> "bar", "baz" -> "boom"))
-  val tileFeature = TileFeature(constantTile, StringWrapper("beepbob"))
+  val tileFeature = TileFeature(bitConstantTile, StringWrapper("beepbob"))
 
   def encoderOf[T: AvroRecordCodec: TypeTag] =
     AvroDerivedSparkEncoder[T].asInstanceOf[ExpressionEncoder[T]]
