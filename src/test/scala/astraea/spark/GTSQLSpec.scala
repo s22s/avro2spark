@@ -93,9 +93,11 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
     it("should code RDD[Extent]") {
       val ds = Seq(extent).toDS()
       assert(ds.toDF.as[Extent].collect().head === extent)
-      ds.select(flattenExtent($"value")).printSchema()
-      ds.select(flattenExtent($"value")).show(false)
-      ds.select(flattenExtent($"value") as "foo").select("foo.*").show(false)
+    }
+
+    it("should flatten extent") {
+      val ds = Seq(extent).toDS()
+      assert(ds.select(flattenExtent($"value")).select("xmax").as[Double].collect().head === extent.xmax)
     }
 
     it("should code RDD[ProjectedExtent]") {
