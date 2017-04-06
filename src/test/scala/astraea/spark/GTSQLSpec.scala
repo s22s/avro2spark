@@ -18,11 +18,14 @@
 
 package astraea.spark
 
+import java.sql.Timestamp
+
 import geotrellis.raster.{ByteCellType, MultibandTile, Tile, TileFeature}
+import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.vector.{Extent, ProjectedExtent}
 import org.apache.spark.sql.GTSQL.Implicits._
 import org.apache.spark.sql.GTSQLFunctions._
-import org.apache.spark.sql.{DataFrame, GTSQL}
+import org.apache.spark.sql.{DataFrame, Encoders, GTSQL}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 import org.apache.spark.sql.execution.debug._
 import org.apache.spark.sql.functions._
@@ -53,7 +56,6 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       val query = sql.sql("select st_focalSum(st_makeConstantTile(1, 10, 10, 'int8raw'), 4)")
       val tile = query.firstTile
       assert(tile.cellType === ByteCellType)
-      // println(tile.asciiDrawDouble())
     }
 
     it("should generate multiple rows") {
@@ -101,6 +103,11 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       assert(ds.toDF.as[ProjectedExtent].collect().head === pe)
     }
 
+    it("should code RDD[TemporalProjectedExtent]") {
+      val ds = Seq(tpe).toDS()
+      assert(ds.toDF.as[TemporalProjectedExtent].collect().head === tpe)
+    }
+
 
     it("should flatten stuff") {
       withClue("Extent") {
@@ -114,8 +121,17 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
         val flattened = ds
           .select(flatten($"value".as[ProjectedExtent]))
           .select(flatten($"extent".as[Extent]), $"crs")
-        flattened.show()
         assert(flattened.select("xmax").as[Double].collect().head === pe.extent.xmax)
+      }
+      withClue("ProjectedExtent") {
+        val ds = Seq(tpe).toDS()
+        val flattened = ds
+          .select(flatten($"value".as[TemporalProjectedExtent]))
+          .select(flatten($"extent".as[Extent]), $"time", $"crs")
+        flattened.show()
+
+        implicit val enc = Encoders.TIMESTAMP
+        assert(flattened.select("time").as[Timestamp].collect().head === new Timestamp(tpe.instant))
       }
     }
   }
