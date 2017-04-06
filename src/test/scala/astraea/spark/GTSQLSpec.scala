@@ -21,10 +21,11 @@ package astraea.spark
 import geotrellis.raster.{ByteCellType, MultibandTile, Tile, TileFeature}
 import geotrellis.vector.{Extent, ProjectedExtent}
 import org.apache.spark.sql.GTSQL.Implicits._
-import org.apache.spark.sql.GTSQLFunctions.flattenExtent
-import org.apache.spark.sql.{DataFrame, GTSQL, GTSQLFunctions}
+import org.apache.spark.sql.GTSQLFunctions._
+import org.apache.spark.sql.{DataFrame, GTSQL}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 import org.apache.spark.sql.execution.debug._
+import org.apache.spark.sql.functions._
 
 /**
  * Test rig for Spark UDTs and friends for GT.
@@ -36,7 +37,7 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
   GTSQL.init(sql)
 
   implicit class DFExtras(df: DataFrame) {
-    def firstTile: Tile = return df.collect().head.getAs[Tile](0)
+    def firstTile: Tile = df.collect().head.getAs[Tile](0)
   }
 
   import _spark.implicits._
@@ -95,14 +96,27 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       assert(ds.toDF.as[Extent].collect().head === extent)
     }
 
-    it("should flatten extent") {
-      val ds = Seq(extent).toDS()
-      assert(ds.select(flattenExtent($"value")).select("xmax").as[Double].collect().head === extent.xmax)
-    }
-
     it("should code RDD[ProjectedExtent]") {
       val ds = Seq(pe).toDS()
       assert(ds.toDF.as[ProjectedExtent].collect().head === pe)
+    }
+
+
+    it("should flatten stuff") {
+      withClue("Extent") {
+        val ds = Seq(extent).toDS()
+        assert(ds.select(flatten(asStruct($"value".as[Extent]))).select("xmax").as[Double].collect().head === extent.xmax)
+        assert(ds.select(flatten($"value".as[Extent])).select("xmax").as[Double].collect().head === extent.xmax)
+        assert(ds.select(expr("st_flattenExtent(value)")).select("xmax").as[Double].collect().head === extent.xmax)
+      }
+      withClue("ProjectedExtent") {
+        val ds = Seq(pe).toDS()
+        val flattened = ds
+          .select(flatten($"value".as[ProjectedExtent]))
+          .select(flatten($"extent".as[Extent]), $"crs")
+        flattened.show()
+        assert(flattened.select("xmax").as[Double].collect().head === pe.extent.xmax)
+      }
     }
   }
 }
