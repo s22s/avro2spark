@@ -19,10 +19,12 @@
 package astraea.spark
 
 import geotrellis.raster.{ByteCellType, MultibandTile, Tile, TileFeature}
+import geotrellis.vector.{Extent, ProjectedExtent}
 import org.apache.spark.sql.GTSQL.Implicits._
-import org.apache.spark.sql.execution.debug._
-import org.apache.spark.sql.{DataFrame, GTSQL}
+import org.apache.spark.sql.GTSQLFunctions.flattenExtent
+import org.apache.spark.sql.{DataFrame, GTSQL, GTSQLFunctions}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
+import org.apache.spark.sql.execution.debug._
 
 /**
  * Test rig for Spark UDTs and friends for GT.
@@ -34,7 +36,7 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
   GTSQL.init(sql)
 
   implicit class DFExtras(df: DataFrame) {
-    def firstTile: Tile = df.collect().head.getAs[Tile](0)
+    def firstTile: Tile = return df.collect().head.getAs[Tile](0)
   }
 
   import _spark.implicits._
@@ -43,7 +45,7 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
     it("should create constant tiles") {
       val query = sql.sql("select st_makeConstantTile(1, 10, 10, 'int8raw')")
       val tile = query.firstTile
-      assert(tile.cellType === ByteCellType)
+      assert((tile.cellType === ByteCellType) (org.scalactic.Equality.default))
     }
 
     it("should evaluate UDF on tile") {
@@ -66,29 +68,39 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
     }
 
     it("should code RDD[(Int, Tile)]") {
-      val rdd = sc.makeRDD(Seq((1, byteArrayTile: Tile)))
-      val ds = rddToDatasetHolder(rdd)(newProductEncoder[(Int, Tile)]).toDS()
-      ds.debugCodegen()
-      ds.show()
+      val ds = Seq((1, byteArrayTile: Tile)).toDS
       assert(ds.toDF.as[(Int, Tile)].collect().head === (1, byteArrayTile))
     }
 
     it("should code RDD[Tile]") {
       val rdd = sc.makeRDD(Seq(byteArrayTile: Tile))
-      val ds = rdd.toDS
+      val ds = rdd.toDF("tile")
       assert(ds.toDF.as[Tile].collect().head === byteArrayTile)
     }
 
     it("should code RDD[MultibandTile]") {
-      val rdd = sc.makeRDD(Seq(multibandTile: MultibandTile))
+      val rdd = sc.makeRDD(Seq(multibandTile))
       val ds = rdd.toDS()
       assert(ds.toDF.as[MultibandTile].collect().head === multibandTile)
     }
 
     it("should code RDD[TileFeature]") {
-      val rdd = sc.makeRDD(Seq(TileFeature(byteArrayTile: Tile, "meta")))
-      val ds = rdd.toDS()
-      ds.show()
+      val thing = TileFeature(byteArrayTile: Tile, "meta")
+      val ds = Seq(thing).toDS()
+      assert(ds.toDF.as[TileFeature[Tile, String]].collect().head === thing)
+    }
+
+    it("should code RDD[Extent]") {
+      val ds = Seq(extent).toDS()
+      assert(ds.toDF.as[Extent].collect().head === extent)
+      ds.select(flattenExtent($"value")).printSchema()
+      ds.select(flattenExtent($"value")).show(false)
+      ds.select(flattenExtent($"value") as "foo").select("foo.*").show(false)
+    }
+
+    it("should code RDD[ProjectedExtent]") {
+      val ds = Seq(pe).toDS()
+      assert(ds.toDF.as[ProjectedExtent].collect().head === pe)
     }
   }
 }
