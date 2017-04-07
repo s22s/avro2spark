@@ -58,16 +58,33 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       assert(tile.cellType === ByteCellType)
     }
 
+    it("should report dimensions") {
+      val query = sql.sql(
+        """|select st_gridRows(tiles) as rows, st_gridCols(tiles) as cols from (
+           |select st_makeConstantTile(1, 10, 10, 'int8raw') as tiles)
+           |""".stripMargin)
+      assert(query.as[(Int, Int)].collect().head === (10, 10))
+    }
+
     it("should generate multiple rows") {
       val query = sql.sql("select st_makeTiles(3)")
       val tiles = query.collect().head.getAs[Seq[Tile]](0)
       assert(tiles.distinct.size == 1)
-
     }
 
-    it("should expand rows") {
-      val query = sql.sql("select st_explodeTile(st_makeConstantTile(1, 10, 10, 'int8raw'), st_makeConstantTile(2, 10, 10, 'int8raw'))")
-      assert(query.as[(Double, Double)].collect().forall(_ == (1.0, 2.0)))
+    it("should explode rows") {
+      val query = sql.sql(
+        """select st_explodeTile(
+          |  st_makeConstantTile(1, 10, 10, 'int8raw'),
+          |  st_makeConstantTile(2, 10, 10, 'int8raw')
+          |)
+          |""".stripMargin)
+      assert(query.select("cell_0", "cell_1").as[(Double, Double)].collect().forall(_ == (1.0, 2.0)))
+      val query2 = sql.sql(
+        """|select st_gridRows(tiles) as rows, st_gridCols(tiles) as cols, st_explodeTile(tiles)  from (
+           |select st_makeConstantTile(1, 10, 10, 'int8raw') as tiles)
+           |""".stripMargin)
+      assert(query2.columns.size === 5)
     }
 
     it("should code RDD[(Int, Tile)]") {
@@ -108,7 +125,6 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
       assert(ds.toDF.as[TemporalProjectedExtent].collect().head === tpe)
     }
 
-
     it("should flatten stuff") {
       withClue("Extent") {
         val ds = Seq(extent).toDS()
@@ -128,8 +144,6 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
         val flattened = ds
           .select(flatten($"value".as[TemporalProjectedExtent]))
           .select(flatten($"extent".as[Extent]), $"time", $"crs")
-        flattened.show()
-
         implicit val enc = Encoders.TIMESTAMP
         assert(flattened.select("time").as[Timestamp].collect().head === new Timestamp(tpe.instant))
       }
