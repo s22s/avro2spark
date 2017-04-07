@@ -63,7 +63,7 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
         """|select st_gridRows(tiles) as rows, st_gridCols(tiles) as cols from (
            |select st_makeConstantTile(1, 10, 10, 'int8raw') as tiles)
            |""".stripMargin)
-      assert(query.as[(Int, Int)].collect().head === (10, 10))
+      assert(query.as[(Int, Int)].collect().head === ((10, 10)))
     }
 
     it("should generate multiple rows") {
@@ -79,17 +79,24 @@ class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironme
           |  st_makeConstantTile(2, 10, 10, 'int8raw')
           |)
           |""".stripMargin)
-      assert(query.select("cell_0", "cell_1").as[(Double, Double)].collect().forall(_ == (1.0, 2.0)))
+      assert(query.select("cell_0", "cell_1").as[(Double, Double)].collect().forall(_ == ((1.0, 2.0))))
       val query2 = sql.sql(
         """|select st_gridRows(tiles) as rows, st_gridCols(tiles) as cols, st_explodeTile(tiles)  from (
            |select st_makeConstantTile(1, 10, 10, 'int8raw') as tiles)
            |""".stripMargin)
       assert(query2.columns.size === 5)
+
+      val df = Seq[(Tile, Tile)]((byteArrayTile, byteArrayTile)).toDF("tile1", "tile2")
+      val exploded = df.select(explodeTile($"tile1", $"tile2"))
+
+      exploded.printSchema()
+      exploded.show()
+
     }
 
     it("should code RDD[(Int, Tile)]") {
       val ds = Seq((1, byteArrayTile: Tile)).toDS
-      assert(ds.toDF.as[(Int, Tile)].collect().head === (1, byteArrayTile))
+      assert(ds.toDF.as[(Int, Tile)].collect().head === ((1, byteArrayTile)))
     }
 
     it("should code RDD[Tile]") {
