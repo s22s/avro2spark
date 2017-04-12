@@ -23,9 +23,9 @@ import java.sql.Timestamp
 import geotrellis.raster.{ByteCellType, MultibandTile, Tile, TileFeature}
 import geotrellis.spark.TemporalProjectedExtent
 import geotrellis.vector.{Extent, ProjectedExtent}
-import org.apache.spark.sql.GTSQL.Implicits._
-import org.apache.spark.sql.GTSQLFunctions._
-import org.apache.spark.sql.{DataFrame, Encoders, GTSQL}
+import org.apache.spark.sql.gt._
+import org.apache.spark.sql.gt.functions._
+import org.apache.spark.sql.{DataFrame, Encoders}
 import org.scalatest.{FunSpec, Inspectors, Matchers}
 import org.apache.spark.sql.execution.debug._
 import org.apache.spark.sql.functions._
@@ -37,7 +37,7 @@ import org.apache.spark.sql.functions._
  */
 class GTSQLSpec extends FunSpec with Matchers with Inspectors with TestEnvironment with TestData {
 
-  GTSQL.init(sql)
+  gtRegister(sql)
 
   implicit class DFExtras(df: DataFrame) {
     def firstTile: Tile = df.collect().head.getAs[Tile](0)
